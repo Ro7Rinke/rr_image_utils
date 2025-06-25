@@ -29,9 +29,20 @@ def get_files(path):
     return [f for f in path.iterdir() if f.is_file()]
 
 def copy_file(source_path, destination_path):
-    source_path = ensure_path(source_path)
-    destination_path = ensure_path(destination_path)
-    shutil.copyfile(source_path, destination_path)
+    try:
+        source_path = ensure_path(source_path)
+        destination_path = ensure_path(destination_path)
+        shutil.copyfile(source_path, destination_path)
+        return True, ''
+    except FileNotFoundError:
+        error = f'Arquivo não encontrado: {source_path}'
+    except PermissionError:
+        error = f'Permissão negada para copiar: {source_path}'
+    except IsADirectoryError:
+        error = f'Esperava um arquivo, mas recebeu um diretório: {source_path}'
+    except Exception as e:
+        error = f'Erro ao copiar {source_path}: {e}'
+    return False, error
 
 def clear_temp():
     if TEMP_DATA_FOLDER_PATH.is_dir():

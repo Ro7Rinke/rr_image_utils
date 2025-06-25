@@ -8,8 +8,12 @@ if __name__ == "__main__":
     # session_id = None
     # images_path = ["/Users/ro7rinke/Desktop/cards_against_humani_24.png"]
     old_images_info = []
-    images_info = []
+    all_images_info = []
     selected_images = []
+
+    def get_selected_images_info():
+        return next(image_info for image_info in enumerate(all_images_info) if image_info.get('id') in selected_images)
+
 
     args_string = " ".join(sys.argv[1:])
 
@@ -23,8 +27,8 @@ if __name__ == "__main__":
 
     session_id = get_session(session_id)
 
-    images_info = import_images(session_id, images_path)
-    print_log(images_info, title='Imported images info')
+    all_images_info, error_images_info = import_images(session_id, images_path)
+    print_log(all_images_info, title='Imported images info')
 
     while True:
         input_string = input()
