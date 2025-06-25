@@ -6,7 +6,7 @@ def import_image(image_info):
     dst = image_info.get('path')
     status, error = copy_file(src, dst)
     image_info['status'] = status
-    image_info['error'] = ''
+    image_info['error'] = error
     return image_info
 
 
