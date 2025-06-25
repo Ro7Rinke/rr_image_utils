@@ -1,5 +1,9 @@
+import copy
+from multiprocessing import Pool, cpu_count
+from debug_log import print_log
 from session import get_session_images_path, new_uuid, copy_file, ensure_path
 from concurrent.futures import ThreadPoolExecutor
+from PIL import Image, UnidentifiedImageError
 
 def import_image(image_info):
     src = image_info.get('external_source_path')
@@ -36,7 +40,115 @@ def import_images(session_id, images_path):
 
     return images_info, error_images_info
 
+def resize_image(config):
+    try:
+        image_info = config.get('image_info')
+        width = config.get('width')
+        height = config.get('height')
+        dpi = config.get('dpi')
+        scale = config.get('scale')
 
+        with Image.open(image_info.get('path')) as img:
+            
+            original_width, original_height = img.size
+
+            match scale:
+                case 'px':
+                    pts_divider = 72
+                case 'mm':
+                    pts_divider = 25.4
+                case 'cm':
+                    pts_divider = 2.54
+                case 'm':
+                    pts_divider = 0.254
+                case 'in':
+                    pts_divider = 1
+                case 'percentage':
+                    pts_divider = 72
+                    width = original_width * (width / 100)
+                    height = original_height * (height / 100)
+                case _:
+                    pts_divider = 25.4
+
+            width_px = width * dpi / pts_divider
+            height_px = height * dpi / pts_divider
+
+            if width_px > original_width and height_px > original_height:
+                algorithm = Image.BICUBIC
+            else:
+                algorithm = Image.LANCZOS
+
+            resized = img.resize((int(width_px), int(height_px)), algorithm)
+            images_folder_path = get_session_images_path(image_info.get('session_id'))
+            new_image_info = copy.deepcopy(image_info)
+            new_image_info['image_id'] = new_uuid()
+            new_image_info['old_image_id'] = image_info.get('image_id')
+            new_image_info['path'] = images_folder_path / f'{new_image_info.get('image_id')}--{new_image_info.get('external_source_path').name}'
+            resized.save(new_image_info.get('path'))
+            new_image_info['status'] = True
+            old_image_info = image_info
+
+            return new_image_info, old_image_info
+        
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except ValueError as e:
+        error = f"Valor inválido ao salvar '{image_info.get('path')}': {e}"
+    except KeyError as e:
+        error = f"Formato não suportado para '{image_info.get('path')}': {e}"
+    except OSError as e:
+        error = f"Falha no sistema de arquivos ao salvar '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+    
+    image_info['status'] = False
+    image_info['error'] = error
+
+    return image_info, []
+
+def resize_images(images_info, width = None, height = None, dpi = 300, scale = 'mm'):
+    old_images_info = []
+    new_images_info = []
+    error_images_info = []
+    configs = []
+
+    for image_info in images_info:
+        config = {
+            'image_info': image_info,
+            'width': width,
+            'height': height,
+            'dpi': dpi,
+            'scale': scale
+        }
+        configs.append(config)
+
+    with Pool(processes=cpu_count()) as pool:
+        resize_results = pool.map(resize_image, configs)
+
+    for new_image_info, old_image_info in resize_results:
+        if new_image_info.get('status'):
+            new_images_info.append(new_image_info)
+            if isinstance(old_image_info, dict):
+                old_images_info.append(old_image_info)
+        else:
+            error_images_info.append(new_image_info)
+
+    return new_images_info, old_images_info, error_images_info
+    
+
+
+
+
+
+
+
+
+
+    
 
 
 

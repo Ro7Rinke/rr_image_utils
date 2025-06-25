@@ -1,7 +1,7 @@
 import sys
 from input_parser import parse_args
 from debug_log import print_log
-from image_utils import import_images
+from image_utils import import_images, resize_images
 from session import clear_temp, get_session
 
 if __name__ == "__main__":
@@ -9,11 +9,19 @@ if __name__ == "__main__":
     # images_path = ["/Users/ro7rinke/Desktop/cards_against_humani_24.png"]
     old_images_info = []
     all_images_info = []
+    error_images_info = []
     selected_images = []
 
     def get_selected_images_info():
         return next(image_info for image_info in enumerate(all_images_info) if image_info.get('id') in selected_images)
 
+    def resize(input_dict):
+        params_filter = ['width', 'height', 'dpi', 'sacale']
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        result_new_images_info, result_old_images_info, result_error_images_info = resize_images(all_images_info, **params)
+        print_log(result_new_images_info, title = 'Resized images')
+        print_log(result_old_images_info, title='Old Images')
+        print_log(result_error_images_info, type='error', level=1, title='Error resize')
 
     args_string = " ".join(sys.argv[1:])
 
@@ -39,6 +47,8 @@ if __name__ == "__main__":
                 clear_temp()
             case 'exit':
                 break
+            case 'resize':
+                resize(input_dict)
             case _:
                 print_log('Invalid action', type='error', level=1)
 
