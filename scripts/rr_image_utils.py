@@ -42,13 +42,15 @@ if __name__ == "__main__":
         input_string = input()
         input_dict = parse_args(input_string)
 
-        match input_dict.get('action'):
-            case 'clear_all':
-                clear_temp()
-            case 'exit':
-                break
-            case 'resize':
-                resize(input_dict)
-            case _:
-                print_log('Invalid action', type='error', level=1)
+        if input_dict.get('clear_all'):
+            clear_temp()
 
+        if input_dict.get('action') is not None:
+            match input_dict.get('action'):
+                case 'resize':
+                    resize(input_dict)
+                case _:
+                    print_log('Invalid action', type='error', level=1)
+
+        if input_dict.get('exit'):
+            break
