@@ -1,7 +1,7 @@
 import sys
 from input_parser import parse_args
 from debug_log import print_log
-from image_utils import import_images, resize_images
+from image_utils import export_images, import_images, resize_images
 from session import clear_temp, get_session
 
 if __name__ == "__main__":
@@ -22,6 +22,13 @@ if __name__ == "__main__":
         print_log(result_new_images_info, title = 'Resized images')
         print_log(result_old_images_info, title='Old Images')
         print_log(result_error_images_info, type='error', level=1, title='Error resize')
+
+    def save_images(input_dict):
+        params_filter = ['output_directory_path']
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        success_images_info, error_images_info = export_images(all_images_info, **params)
+        print_log(success_images_info, title='Salvos com sucesso', level=1)
+        print_log(error_images_info, title='Erros ao salvar', type='error', level=1)
 
     args_string = " ".join(sys.argv[1:])
 
@@ -49,6 +56,8 @@ if __name__ == "__main__":
             match input_dict.get('action'):
                 case 'resize':
                     resize(input_dict)
+                case 'save_images':
+                    save_images(input_dict)
                 case _:
                     print_log('Invalid action', type='error', level=1)
 

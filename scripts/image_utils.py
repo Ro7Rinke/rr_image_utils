@@ -40,6 +40,35 @@ def import_images(session_id, images_path):
 
     return images_info, error_images_info
 
+def export_image(image_info):
+    src = image_info.get('path')
+    dst = image_info.get('external_output_path')
+    status, error = copy_file(src, dst)
+    image_info['status'] = status
+    image_info['error'] = error
+    return image_info
+
+def export_images(images_info, output_directory_path):
+    success_images_info = []
+    error_images_info = []
+    output_directory_path = ensure_path(output_directory_path)
+    for image_info in images_info:
+        name = image_info.get('external_source_path').name
+        image_info['external_output_path'] = output_directory_path / name
+
+    with ThreadPoolExecutor() as executor:
+        copy_results = list(executor.map(export_image, images_info))
+        for image_info in copy_results:
+            if image_info.get('status'):
+                success_images_info.append(image_info)
+            else:
+                error_images_info.append(image_info)
+
+    return success_images_info, error_images_info
+    
+
+
+
 def resize_image(config):
     try:
         image_info = config.get('image_info')
