@@ -13,7 +13,6 @@ def import_image(image_info):
     image_info['error'] = error
     return image_info
 
-
 def import_images(session_id, images_path):
     images_folder_path = get_session_images_path(session_id)
     import_images_info = []
@@ -65,9 +64,18 @@ def export_images(images_info, output_directory_path):
                 error_images_info.append(image_info)
 
     return success_images_info, error_images_info
-    
 
+def save_new_image(image_info, new_img):
+    images_folder_path = get_session_images_path(image_info.get('session_id'))
+    new_image_info = copy.deepcopy(image_info)
+    new_image_info['image_id'] = new_uuid()
+    new_image_info['old_image_id'] = image_info.get('image_id')
+    new_image_info['path'] = images_folder_path / f'{new_image_info.get('image_id')}--{new_image_info.get('external_source_path').name}'
+    new_img.save(new_image_info.get('path'))
+    new_image_info['status'] = True
+    old_image_info = image_info
 
+    return new_image_info, old_image_info
 
 def resize_image(config):
     try:
@@ -108,16 +116,7 @@ def resize_image(config):
                 algorithm = Image.LANCZOS
 
             resized = img.resize((int(width_px), int(height_px)), algorithm)
-            images_folder_path = get_session_images_path(image_info.get('session_id'))
-            new_image_info = copy.deepcopy(image_info)
-            new_image_info['image_id'] = new_uuid()
-            new_image_info['old_image_id'] = image_info.get('image_id')
-            new_image_info['path'] = images_folder_path / f'{new_image_info.get('image_id')}--{new_image_info.get('external_source_path').name}'
-            resized.save(new_image_info.get('path'))
-            new_image_info['status'] = True
-            old_image_info = image_info
-
-            return new_image_info, old_image_info
+            return save_new_image(image_info, resized)
         
     except FileNotFoundError:
         error = f"Arquivo não encontrado: {image_info.get('path')}"
@@ -167,7 +166,108 @@ def resize_images(images_info, width = None, height = None, dpi = 300, scale = '
             error_images_info.append(new_image_info)
 
     return new_images_info, old_images_info, error_images_info
+
+def convert_to_px(value, scale, dpi = 300, total_size = None):
+    try:
+        match(scale):
+            case 'px':
+                return int(value)
+            case 'mm':
+                return int(value * dpi / 25.4)
+            case 'cm':
+                return int(value * dpi / 2.54)
+            case 'in':
+                return int(value * dpi)
+            case 'percentage':
+                return int(total_size * value / 100)
+            case _:
+                raise ValueError(f'Escala não suportada: {scale}')
+    except Exception as e:
+        raise ValueError(f'Erro ao converter escala "{scale}": {e}')
+
+def edit_border_image(config):
+    image_info = config.get('image_info')
+    left = config.get('left')
+    right = config.get('right')
+    top = config.get('top')
+    bottom = config.get('bottom')
+    scale = config.get('scale')
+    type = config.get('type')
+    color = config.get('color')
+    dpi = config.get('dpi')
+
+    try:
+        with Image.open(image_info.get('path')) as img:
+            original_width, original_height = img.size
+
+            left_px = convert_to_px(left, scale, dpi, original_width)
+            right_px = convert_to_px(right, scale, dpi, original_width)
+            top_px = convert_to_px(top, scale, dpi, original_height)
+            bottom_px = convert_to_px(bottom, scale, dpi, original_height)
+
+            crop_box = (
+                left_px,
+                top_px,
+                original_width - right_px,
+                original_height - bottom_px
+            )
+
+            cropped_img = img.crop(crop_box)
+            return save_new_image(image_info, cropped_img)
+
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except ValueError as e:
+        error = f"Valor inválido ao salvar '{image_info.get('path')}': {e}"
+    except KeyError as e:
+        error = f"Formato não suportado para '{image_info.get('path')}': {e}"
+    except OSError as e:
+        error = f"Falha no sistema de arquivos ao salvar '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+
+    image_info['status'] = False
+    image_info['error'] = error
+
+    return image_info, []
     
+def edit_border_images(images_info, left, right, top, bottom, scale, type, color, dpi):
+    old_images_info = []
+    new_images_info = []
+    error_images_info = []
+    configs = []
+
+    for image_info in images_info:
+        config = {
+            'image_info': image_info,
+            'left': left,
+            'right': right,
+            'top': top,
+            'bottom': bottom,
+            'scale': scale,
+            'type': type,
+            'color': color,
+            'dpi': dpi
+        }
+        configs.append(config)
+
+    with Pool(processes=cpu_count()) as pool:
+        cropped_results = pool.map(edit_border_image, configs)
+
+    for new_image_info, old_image_info in cropped_results:
+        if new_image_info.get('status'):
+            new_images_info.append(new_image_info)
+            if isinstance(old_image_info, dict):
+                old_images_info.append(old_image_info)
+        else:
+            error_images_info.append(new_image_info)
+
+    return new_images_info, old_images_info, error_images_info
+
 
 
 
