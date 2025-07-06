@@ -18,6 +18,7 @@ def parse_args(args_string):
     for token in tokens:
         if token.startswith("--"):
             if key:
+                # Adiciona como lista apenas se houver mais de 1 valor
                 result[key] = (
                     [auto_convert(v) for v in values] if len(values) > 1 else
                     auto_convert(values[0]) if values else True
@@ -27,7 +28,6 @@ def parse_args(args_string):
         else:
             values.append(token)
 
-    # Último argumento
     if key:
         result[key] = (
             [auto_convert(v) for v in values] if len(values) > 1 else

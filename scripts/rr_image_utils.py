@@ -1,7 +1,8 @@
+import shlex
 import sys
 from input_parser import parse_args
 from debug_log import print_log
-from image_utils import export_images, import_images, resize_images
+from image_utils import export_images, export_to_word, images_from_grid, import_images, import_images_from_pdf, resize_images
 from session import clear_temp, get_session
 
 if __name__ == "__main__":
@@ -30,19 +31,35 @@ if __name__ == "__main__":
         print_log(success_images_info, title='Salvos com sucesso', level=1)
         print_log(error_images_info, title='Erros ao salvar', type='error', level=1)
 
-    args_string = " ".join(sys.argv[1:])
+    def create_word(input_dict):
+        params_filter = ['output_directory_path', 'dpi', 'file_name']
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        success_images_info, error_images_info = export_to_word(all_images_info, **params)
+        print_log(success_images_info, title='Salvos com sucesso', level=1)
+        print_log(error_images_info, title='Erros ao salvar', type='error', level=1)
+
+    def from_grid(input_dict):
+        params_filter = ['cols', 'rows']
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        all_images_info = images_from_grid(all_images_info, **params)
+        print_log(all_images_info, title='Grid recortado')
+
+    args_string = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
 
     args_string = args_string or input()
     args_dict = parse_args(args_string)
     print_log(args_dict, title='Parsed ARGS')
 
     session_id = args_dict.get('session_id')
+    is_pdf = args_dict.get('pdf')
     images_path = args_dict.get('images_path', [])
     images_path = [images_path] if isinstance(images_path, str) else images_path
+    params_filter = ['dpi']
+    params = {key: args_dict[key] for key in params_filter if key in args_dict}
 
     session_id = get_session(session_id)
 
-    all_images_info, error_images_info = import_images(session_id, images_path)
+    all_images_info, error_images_info = import_images_from_pdf(session_id, images_path, **params) if is_pdf else import_images(session_id, images_path)
     print_log(all_images_info, title='Imported images info')
 
     while True:
@@ -58,8 +75,19 @@ if __name__ == "__main__":
                     resize(input_dict)
                 case 'save_images':
                     save_images(input_dict)
+                case 'create_word':
+                    create_word(input_dict)
+                case 'from_grid':
+                    from_grid(input_dict)
                 case _:
                     print_log('Invalid action', type='error', level=1)
 
         if input_dict.get('exit'):
             break
+
+
+
+
+
+
+# /Users/ro7rinke/Library/CloudStorage/GoogleDrive-ro7rinke2@gmail.com/My Drive/BoardGame/Brass Birmingham/final-print/brass-print.pdf
