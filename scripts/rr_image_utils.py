@@ -2,7 +2,7 @@ import shlex
 import sys
 from input_parser import parse_args
 from debug_log import print_log
-from image_utils import export_images, export_to_word, images_from_grid, import_images, import_images_from_pdf, resize_images
+from image_utils import export_images, export_to_pdf, export_to_word, images_from_grid, import_images, import_images_from_pdf, resize_images
 from session import clear_temp, get_session
 
 if __name__ == "__main__":
@@ -31,18 +31,25 @@ if __name__ == "__main__":
         print_log(success_images_info, title='Salvos com sucesso', level=1)
         print_log(error_images_info, title='Erros ao salvar', type='error', level=1)
 
-    def create_word(input_dict):
+    def to_word(input_dict):
         params_filter = ['output_directory_path', 'dpi', 'file_name']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         success_images_info, error_images_info = export_to_word(all_images_info, **params)
         print_log(success_images_info, title='Salvos com sucesso', level=1)
         print_log(error_images_info, title='Erros ao salvar', type='error', level=1)
 
+    def to_pdf(input_dict):
+        params_filter = ['output_directory_path', 'dpi', 'file_name']
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        success_images_info, error_images_info = export_to_pdf(all_images_info, **params)
+        print_log(success_images_info, title='Exportadas para PDF com sucesso', level=1)
+        print_log(error_images_info, title='Erros ao exportar para PDF', type='error', level=1)
+
     def from_grid(input_dict):
         params_filter = ['cols', 'rows']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
-        all_images_info = images_from_grid(all_images_info, **params)
-        print_log(all_images_info, title='Grid recortado')
+        success_images_info = images_from_grid(all_images_info, **params)
+        print_log(success_images_info, title='Grid recortado')
 
     args_string = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
 
@@ -75,8 +82,10 @@ if __name__ == "__main__":
                     resize(input_dict)
                 case 'save_images':
                     save_images(input_dict)
-                case 'create_word':
-                    create_word(input_dict)
+                case 'to_word':
+                    to_word(input_dict)
+                case 'to_pdf':
+                    to_pdf(input_dict)
                 case 'from_grid':
                     from_grid(input_dict)
                 case _:

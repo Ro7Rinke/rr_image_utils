@@ -8,6 +8,10 @@ from PIL import Image, UnidentifiedImageError
 from docx import Document
 from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
+import io
 
 def import_image(image_info):
     src = image_info.get('external_source_path')
@@ -379,6 +383,117 @@ def export_to_word(images_info, output_directory_path, dpi = None, file_name = N
 
     return success_images_info, error_images_info
 
+def rotate_if_needed(img, max_width, max_height):
+    img_width, img_height = img.size
+    if img_width > max_width or img_height > max_height:
+        if img_height <= max_width and img_width <= max_height:
+            return img.rotate(90, expand=True)
+    return img
+
+def get_buffer_image(config):
+    image_info = config.get('image_info')
+    dpi = config.get('dpi')
+    page_width = config.get('page_width')
+    page_height = config.get('page_height')
+
+    try:
+        with Image.open(image_info.get('path')) as img:
+            img = rotate_if_needed(img, page_width, page_height)
+            img_width, img_height = img.size
+            
+            image_dpi = dpi or img.info.get('dpi', (72, 72))[0]
+            img_width_pts = img_width * (72 / image_dpi)
+            img_height_pts = img_height * (72 / image_dpi)
+            
+            x = (page_width - img_width_pts) / 2
+            y = (page_height - img_height_pts) / 2
+            
+            img_format = img.format or 'PNG'
+            buffer = io.BytesIO()
+            img.save(buffer, format=img_format)
+            buffer.seek(0)
+
+            image_info['error'] = None
+            image_info['status'] = True
+
+            result = {
+                'buffer': buffer,
+                'x': x,
+                'y': y,
+                'img_width_pts': img_width_pts, 
+                'img_height_pts': img_height_pts
+            }
+
+            return image_info, result
+
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except ValueError as e:
+        error = f"Valor inválido ao salvar '{image_info.get('path')}': {e}"
+    except KeyError as e:
+        error = f"Formato não suportado para '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+
+    image_info['error'] = error
+    image_info['status'] = False
+
+    return image_info, None
+
+def export_to_pdf(images_info, output_directory_path, dpi=None, file_name = None):
+    success_images_info = []
+    error_images_info = []
+    configs = []
+    
+    file_name = f'pdf_of_images.pdf' if file_name is None else f'{file_name}.pdf'
+    output_directory_path = ensure_path(output_directory_path)
+    output_pdf_path =  output_directory_path / file_name
+
+    page_width, page_height = A4
+    
+    c = canvas.Canvas(str(output_pdf_path), pagesize=A4)
+
+    for image_info in images_info:
+        config = {
+            'image_info': image_info,
+            'dpi': dpi,
+            'page_width': page_width,
+            'page_height': page_height
+        }
+        configs.append(config)
+
+    with Pool(processes=cpu_count()) as pool:
+        buffer_results = pool.map(get_buffer_image, configs)
+
+    for image_info, result in buffer_results:
+        if image_info.get('status'):
+            buffer = result.get('buffer')
+            x = result.get('x')
+            y = result.get('y')
+            img_width_pts = result.get('img_width_pts')
+            img_height_pts = result.get('img_height_pts')
+
+            c.drawImage(
+                ImageReader(buffer),
+                x, y,
+                width=img_width_pts,
+                height=img_height_pts,
+                mask='auto',
+                preserveAspectRatio=True,
+            )
+            c.showPage()
+            success_images_info.append(image_info)
+        else:
+            error_images_info.append(image_info)
+
+    c.save()
+
+    return success_images_info, error_images_info
+
 def get_from_grid(config):
     image_info = config.get('image_info')
     rows = config.get('rows')
@@ -449,7 +564,7 @@ def images_from_grid(images_info, rows = 1, cols = 1):
 
 # --output_directory_path "/Users/ro7rinke/Documents/rr_image_utils/data/temp"
 
-
+# --action to_pdf --file_name brass --output_directory_path "/Users/ro7rinke/Documents/rr_image_utils/data/temp"
     
 
 
