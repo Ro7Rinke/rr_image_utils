@@ -14,9 +14,11 @@ if __name__ == "__main__":
     selected_images = []
 
     def get_selected_images_info():
+        global old_images_info, all_images_info, error_images_info, selected_images
         return next(image_info for image_info in enumerate(all_images_info) if image_info.get('id') in selected_images)
 
     def resize(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
         params_filter = ['width', 'height', 'dpi', 'sacale']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_new_images_info, result_old_images_info, result_error_images_info = resize_images(all_images_info, **params)
@@ -28,6 +30,7 @@ if __name__ == "__main__":
         old_images_info = result_old_images_info
 
     def save_images(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
         params_filter = ['output_directory_path']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_success_images_info, result_error_images_info = export_images(all_images_info, **params)
@@ -37,6 +40,7 @@ if __name__ == "__main__":
         error_images_info = result_error_images_info
 
     def to_word(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
         params_filter = ['output_directory_path', 'dpi', 'file_name']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_success_images_info, result_error_images_info = export_to_word(all_images_info, **params)
@@ -46,6 +50,7 @@ if __name__ == "__main__":
         error_images_info = result_error_images_info
 
     def to_pdf(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
         params_filter = ['output_directory_path', 'dpi', 'file_name']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_success_images_info, result_error_images_info = export_to_pdf(all_images_info, **params)
@@ -55,6 +60,7 @@ if __name__ == "__main__":
         error_images_info = result_error_images_info
 
     def from_grid(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
         params_filter = ['cols', 'rows']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_success_images_info = images_from_grid(all_images_info, **params)
@@ -62,6 +68,7 @@ if __name__ == "__main__":
         all_images_info = result_success_images_info
 
     def preview_images(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
         quicklook_images(all_images_info)
 
     args_string = " ".join(shlex.quote(arg) for arg in sys.argv[1:])

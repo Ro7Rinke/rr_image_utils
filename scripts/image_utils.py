@@ -401,9 +401,10 @@ def export_to_word(images_info, output_directory_path, dpi = None, file_name = N
 
 def rotate_if_needed(img, max_width, max_height):
     img_width, img_height = img.size
-    if img_width > max_width or img_height > max_height:
-        if img_height <= max_width and img_width <= max_height:
-            return img.rotate(90, expand=True)
+    # if img_width > max_width or img_height > max_height:
+        # if img_height <= max_width and img_width <= max_height:
+    if img_width > img_height:    
+        return img.rotate(90, expand=True)
     return img
 
 def get_buffer_image(config):
