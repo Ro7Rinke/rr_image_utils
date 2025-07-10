@@ -2,7 +2,7 @@ import shlex
 import sys
 from input_parser import parse_args
 from debug_log import print_log
-from image_utils import export_images, export_to_pdf, export_to_word, images_from_grid, import_images, import_images_from_pdf, quicklook_images, resize_images
+from image_utils import convert_images_to_jpeg, export_images, export_to_pdf, export_to_word, images_from_grid, import_images, import_images_from_pdf, quicklook_images, resize_images
 from session import clear_temp, get_session
 
 if __name__ == "__main__":
@@ -71,6 +71,17 @@ if __name__ == "__main__":
         global old_images_info, all_images_info, error_images_info, selected_images
         quicklook_images(all_images_info)
 
+    def to_jpeg(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
+        params_filter = ['dpi', 'quality', 'background_color']
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        result_new_images_info, result_old_images_info, result_error_images_info = convert_images_to_jpeg(all_images_info, **params)
+        print_log(result_new_images_info, title='Convertidas para JPEG com sucesso', level=1)
+        print_log(result_error_images_info, title='Erros ao converter para JPEG', type='error', level=1)
+        all_images_info = result_new_images_info
+        error_images_info = result_error_images_info
+        old_images_info = result_old_images_info
+
     args_string = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
 
     args_string = args_string or input()
@@ -110,6 +121,8 @@ if __name__ == "__main__":
                     from_grid(input_dict)
                 case 'preview':
                     preview_images(input_dict)
+                case 'to_jpeg':
+                    to_jpeg(input_dict)
                 case _:
                     print_log('Invalid action', type='error', level=1)
 

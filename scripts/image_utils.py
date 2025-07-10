@@ -135,16 +135,25 @@ def export_images(images_info, output_directory_path):
 
     return success_images_info, error_images_info
 
-def save_new_image(image_info, new_img):
+def save_new_image(image_info, new_img, format=None, dpi=None, quality=None, optimize=True):
     old_image_info = None
     images_folder_path = get_session_images_path(image_info.get('session_id'))
     new_image_info = copy.deepcopy(image_info)
-    new_image_info['image_id'] = new_uuid()
-    if image_info.get('image_id') is not None:
-        new_image_info['old_image_id'] = image_info.get('image_id')
+    new_image_info['id'] = new_uuid()
+    if image_info.get('id') is not None:
+        new_image_info['old_id'] = image_info.get('id')
         old_image_info = image_info
-    new_image_info['path'] = images_folder_path / f'{new_image_info.get('image_id')}--{new_image_info.get('external_source_path').name}'
-    new_img.save(new_image_info.get('path'))
+    new_image_info['path'] = images_folder_path / f'{new_image_info.get('id')}--{new_image_info.get('external_source_path').name}'
+    save_args = {
+        'optimize': optimize
+    }
+    if format is not None:
+        save_args['format'] = format
+    if dpi is not None:
+        save_args['dpi'] = (dpi, dpi)
+    if quality is not None:
+        save_args['quality'] = quality
+    new_img.save(new_image_info.get('path'), **save_args)
     new_image_info['status'] = True
 
     return new_image_info, old_image_info
@@ -399,49 +408,42 @@ def export_to_word(images_info, output_directory_path, dpi = None, file_name = N
 
     return success_images_info, error_images_info
 
-def rotate_if_needed(img, max_width, max_height):
+def rotate_if_needed(img):
     img_width, img_height = img.size
-    # if img_width > max_width or img_height > max_height:
-        # if img_height <= max_width and img_width <= max_height:
     if img_width > img_height:    
         return img.rotate(90, expand=True)
     return img
 
-def get_buffer_image(config):
+def create_pdf_page(config):
     image_info = config.get('image_info')
     dpi = config.get('dpi')
-    page_width = config.get('page_width')
-    page_height = config.get('page_height')
 
     try:
         with Image.open(image_info.get('path')) as img:
-            img = rotate_if_needed(img, page_width, page_height)
+
+            if img.mode in ("RGBA", "LA"):
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3])
+                img = background
+            else:
+                img = img.convert("RGB")
+
+            img = rotate_if_needed(img)
+
             img_width, img_height = img.size
-            
             image_dpi = dpi or img.info.get('dpi', (72, 72))[0]
-            img_width_pts = img_width * (72 / image_dpi)
-            img_height_pts = img_height * (72 / image_dpi)
+
+            A4_WIDTH_PX = int(8.27 * image_dpi)
+            A4_HEIGHT_PX = int(11.69 * image_dpi)
+            A4_SIZE = (A4_WIDTH_PX, A4_HEIGHT_PX)
+
+            x = (A4_WIDTH_PX - img_width) // 2
+            y = (A4_HEIGHT_PX - img_height) // 2
+
+            page = Image.new("RGB", A4_SIZE, (255, 255, 255))
+            page.paste(img, (x, y))
             
-            x = (page_width - img_width_pts) / 2
-            y = (page_height - img_height_pts) / 2
-            
-            img_format = img.format or 'PNG'
-            buffer = io.BytesIO()
-            img.save(buffer, format=img_format)
-            buffer.seek(0)
-
-            image_info['error'] = None
-            image_info['status'] = True
-
-            result = {
-                'buffer': buffer,
-                'x': x,
-                'y': y,
-                'img_width_pts': img_width_pts, 
-                'img_height_pts': img_height_pts
-            }
-
-            return image_info, result
+            return save_new_image(image_info, page)
 
     except FileNotFoundError:
         error = f"Arquivo não encontrado: {image_info.get('path')}"
@@ -456,8 +458,8 @@ def get_buffer_image(config):
     except Exception as e:
         error = f"Erro inesperado com '{image_info.get('path')}': {e}"
 
-    image_info['error'] = error
     image_info['status'] = False
+    image_info['error'] = error
 
     return image_info, None
 
@@ -465,49 +467,44 @@ def export_to_pdf(images_info, output_directory_path, dpi=None, file_name = None
     success_images_info = []
     error_images_info = []
     configs = []
+    images = []
     
     file_name = f'pdf_of_images.pdf' if file_name is None else f'{file_name}.pdf'
     output_directory_path = ensure_path(output_directory_path)
     output_pdf_path =  output_directory_path / file_name
-
-    page_width, page_height = A4
     
-    c = canvas.Canvas(str(output_pdf_path), pagesize=A4)
+    # c = canvas.Canvas(str(output_pdf_path), pagesize=A4)
 
     for image_info in images_info:
         config = {
             'image_info': image_info,
-            'dpi': dpi,
-            'page_width': page_width,
-            'page_height': page_height
+            'dpi': dpi
         }
         configs.append(config)
 
     with Pool(processes=cpu_count()) as pool:
-        buffer_results = pool.map(get_buffer_image, configs)
+        pages_result = pool.map(create_pdf_page, configs)
 
-    for image_info, result in buffer_results:
+    for image_info, old_image_info in pages_result:
         if image_info.get('status'):
-            buffer = result.get('buffer')
-            x = result.get('x')
-            y = result.get('y')
-            img_width_pts = result.get('img_width_pts')
-            img_height_pts = result.get('img_height_pts')
-
-            c.drawImage(
-                ImageReader(buffer),
-                x, y,
-                width=img_width_pts,
-                height=img_height_pts,
-                mask='auto',
-                preserveAspectRatio=True,
-            )
-            c.showPage()
-            success_images_info.append(image_info)
+            img = Image.open(image_info.get('path'))
+            images.append(img)
+            success_images_info.append(old_image_info)
         else:
             error_images_info.append(image_info)
 
-    c.save()
+    resolution = dpi or images[0].info.get('dpi', (72, 72))[0]
+    if images:
+        images[0].save(
+            output_pdf_path,
+            save_all=True,
+            append_images=images[1:],
+            resolution=resolution,
+            optimize=True
+        )
+
+        for img in images:
+            img.close()
 
     return success_images_info, error_images_info
 
@@ -543,19 +540,6 @@ def get_from_grid(config):
         
         return new_images_info
 
-    # except FileNotFoundError:
-    #         error = f"Arquivo não encontrado: {image_info.get('path')}"
-    # except UnidentifiedImageError:
-    #     error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
-    # except OSError as e:
-    #     error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
-    # except ValueError as e:
-    #     error = f"Valor inválido ao salvar '{image_info.get('path')}': {e}"
-    # except KeyError as e:
-    #     error = f"Formato não suportado para '{image_info.get('path')}': {e}"
-    # except Exception as e:
-    #     error = f"Erro inesperado com '{image_info.get('path')}': {e}"
-
 def images_from_grid(images_info, rows = 1, cols = 1):
     new_images_info = []
     configs = []
@@ -583,6 +567,82 @@ def quicklook_images(images_info):
             paths.append(str(image_path))
 
     subprocess.run(["qlmanage", "-p"] + paths)
+
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) != 6:
+        raise ValueError(f"Cor hexadecimal inválida: {hex_color}")
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+def convert_to_jpeg(config):
+    image_info = config.get('image_info')
+    background_color = config.get('background_color')
+    dpi = config.get('dpi')
+    quality = config.get('quality')
+
+    try:
+        with Image.open(image_info.get('path')) as img:
+            bg_rgb = hex_to_rgb(background_color)
+
+            if img.mode in ("RGBA", "LA"):
+                background = Image.new("RGB", img.size, bg_rgb)
+                background.paste(img, mask=img.split()[-1])
+                img = background
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
+
+            return save_new_image(image_info, img, format="JPEG", dpi=dpi, quality=quality)
+            
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except ValueError as e:
+        error = f"Valor inválido ao salvar '{image_info.get('path')}': {e}"
+    except KeyError as e:
+        error = f"Formato não suportado para '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+
+    image_info['status'] = False
+    image_info['error'] = error
+
+    return image_info
+
+def convert_images_to_jpeg(images_info, dpi=None, quality=85, background_color='#FFFFFF'):
+    new_images_info = []
+    old_images_info = []
+    error_images_info = []
+    configs = []
+
+    for image_info in images_info:
+        config = {
+            'image_info': image_info,
+            'background_color': background_color,
+            'dpi': dpi,
+            'quality': quality
+        }
+        configs.append(config)
+
+    with Pool(processes=cpu_count()) as pool:
+        converted_results = pool.map(convert_to_jpeg, configs)
+
+    for new_image_info, old_image_info in converted_results:
+        if new_image_info.get('status'):
+            new_images_info.append(new_image_info)
+            if isinstance(old_image_info, dict):
+                old_images_info.append(old_image_info)
+        else:
+            error_images_info.append(new_image_info)
+
+    return new_images_info, old_images_info, error_images_info
+
+
+
+
+
 
 # --action from_grid --rows 3 --cols 3
 
