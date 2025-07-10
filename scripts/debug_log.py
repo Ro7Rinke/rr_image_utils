@@ -1,7 +1,7 @@
 
 LOG_TYPES = {
     'info': '"\033[36mINFO:\033[0m"',
-    'warning': "\033[WARNING:\033[0m",
+    'warning': "\033[33mWARNING:\033[0m",
     'error': '"\033[31mERROR:\033[0m"'
 }
 
