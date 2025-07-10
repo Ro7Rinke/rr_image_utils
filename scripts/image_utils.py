@@ -1,4 +1,5 @@
 import copy
+import subprocess
 import fitz
 from multiprocessing import Pool, cpu_count
 from debug_log import print_log
@@ -21,11 +22,26 @@ def import_image(image_info):
     image_info['error'] = error
     return image_info
 
+def get_images_path_from_dirs(dir_images_path):
+    new_images_path = []
+    for image_path in dir_images_path:
+        image_path = ensure_path(image_path)
+        if image_path.is_dir():
+            all_files = [p for p in image_path.iterdir() if p.is_file() and not p.name.startswith('.')]
+            new_images_path.extend(all_files)
+        else:
+            new_images_path.append(image_path)
+    
+    return new_images_path
+
 def import_images(session_id, images_path):
     images_folder_path = get_session_images_path(session_id)
     import_images_info = []
     images_info = []
     error_images_info = []
+
+    images_path = get_images_path_from_dirs(images_path)
+
     for image_path in images_path:
         image_path = ensure_path(image_path)
         image_id = new_uuid()
@@ -557,6 +573,15 @@ def images_from_grid(images_info, rows = 1, cols = 1):
 
     return new_images_info
 
+def quicklook_images(images_info):
+    paths = []
+    
+    for image_info in images_info:
+        image_path = ensure_path(image_info.get('path'))
+        if image_path.is_file():
+            paths.append(str(image_path))
+
+    subprocess.run(["qlmanage", "-p"] + paths)
 
 # --action from_grid --rows 3 --cols 3
 
