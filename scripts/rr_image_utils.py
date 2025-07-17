@@ -19,7 +19,7 @@ if __name__ == "__main__":
 
     def resize(input_dict):
         global old_images_info, all_images_info, error_images_info, selected_images
-        params_filter = ['width', 'height', 'dpi', 'sacale']
+        params_filter = ['width', 'height', 'dpi', 'scale']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_new_images_info, result_old_images_info, result_error_images_info = resize_images(all_images_info, **params)
         print_log(result_new_images_info, title = 'Resized images')
