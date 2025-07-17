@@ -171,26 +171,26 @@ def resize_image(config):
             
             original_width, original_height = img.size
 
-            match scale:
-                case 'px':
-                    pts_divider = 72
-                case 'mm':
-                    pts_divider = 25.4
-                case 'cm':
-                    pts_divider = 2.54
-                case 'm':
-                    pts_divider = 0.254
-                case 'in':
-                    pts_divider = 1
-                case 'percentage':
-                    pts_divider = 72
-                    width = original_width * (width / 100)
-                    height = original_height * (height / 100)
-                case _:
-                    pts_divider = 25.4
+            if scale == 'percentage':
+                width_px = original_width * (width / 100)
+                height_px = original_height * (height / 100)
+            else:
+                match scale:
+                    case 'px':
+                        pts_divider = 72
+                    case 'mm':
+                        pts_divider = 25.4
+                    case 'cm':
+                        pts_divider = 2.54
+                    case 'm':
+                        pts_divider = 0.0254
+                    case 'in':
+                        pts_divider = 1
+                    case _:
+                        pts_divider = 25.4
 
-            width_px = width * dpi / pts_divider
-            height_px = height * dpi / pts_divider
+                width_px = width * dpi / pts_divider
+                height_px = height * dpi / pts_divider
 
             if width_px > original_width and height_px > original_height:
                 algorithm = Image.BICUBIC
