@@ -1,6 +1,8 @@
 import copy
 import subprocess
+import cv2
 import fitz
+import io
 from multiprocessing import Pool, cpu_count
 from debug_log import print_log
 from session import get_session_images_path, new_uuid, copy_file, ensure_path
@@ -12,7 +14,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
-import io
+import numpy as np
 
 def import_image(image_info):
     src = image_info.get('external_source_path')
@@ -108,7 +110,6 @@ def import_images_from_pdf(session_id, pdfs_path, page_as_image = True, dpi = 30
 
     return images_info, []
     
-
 def export_image(image_info):
     src = image_info.get('path')
     dst = image_info.get('external_output_path')
@@ -639,10 +640,97 @@ def convert_images_to_jpeg(images_info, dpi=None, quality=85, background_color='
 
     return new_images_info, old_images_info, error_images_info
 
+def convert_cv2_to_pil(cv2_img):
+    if len(cv2_img.shape) == 2:
+        return Image.fromarray(cv2_img)
+    elif len(cv2_img.shape) == 3:
+        channels = cv2_img.shape[2]
 
+        if channels == 4:
+            img = cv2.cvtColor(cv2_img, cv2.COLOR_BGRA2RGBA)
+            return Image.fromarray(img)
+        elif channels == 3:
+            img = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(img)
+        
+    raise ValueError("Formato de imagem desconhecido")
 
+def remove_noise_from_image(image_info):
 
+    try:
+        img = cv2.imread(str(image_info.get('path')))
+        if img is None:
+            image_info['error'] = f"Imagem não pôde ser lida: {image_info.get('path')}"
+            image_info['status'] = False
+            
+            return image_info, []
+        
+        # Configurações dos filtros
+        GAUSSIAN_BLUR_ENABLED = True
+        GAUSSIAN_BLUR_KERNEL_SIZE = (5, 5)  # Tamanho do kernel para o desfoque gaussiano
+        GAUSSIAN_BLUR_SIGMA_X = 1.5 #1.2 #4.0 #1.0  # Desvio padrão no eixo X
+        GAUSSIAN_BLUR_SIGMA_Y = 1.5 #1.2 #4.0 #1.0  # Desvio padrão no eixo Y
 
+        BILATERAL_FILTER_ENABLED = True
+        BILATERAL_FILTER_D = 22 #9 #4 #9  # Diâmetro da vizinhança do pixel
+        BILATERAL_FILTER_SIGMA_COLOR = 75 #40 #75  # Filtra o espaço de cores sigma
+        BILATERAL_FILTER_SIGMA_SPACE = 75 #40 #75  # Filtra o espaço coordenado sigma
+
+        MEDIAN_BLUR_ENABLED = False
+        MEDIAN_BLUR_KERNEL_SIZE = 3  # Tamanho do kernel para o desfoque mediano
+
+        SHARPEN_FILTER_ENABLED = True
+        SHARPEN_FILTER_KERNEL = np.array([[-1, -1, -1], [-1,  9, -1], [-1, -1, -1]])  # Kernel para o filtro de nitidez
+
+        if GAUSSIAN_BLUR_ENABLED:
+            img = cv2.GaussianBlur(img, GAUSSIAN_BLUR_KERNEL_SIZE, GAUSSIAN_BLUR_SIGMA_X, GAUSSIAN_BLUR_SIGMA_Y)
+
+        if BILATERAL_FILTER_ENABLED:
+            img = cv2.bilateralFilter(img, BILATERAL_FILTER_D, BILATERAL_FILTER_SIGMA_COLOR, BILATERAL_FILTER_SIGMA_SPACE)
+
+        if MEDIAN_BLUR_ENABLED:
+            img = cv2.medianBlur(img, MEDIAN_BLUR_KERNEL_SIZE)
+
+        if SHARPEN_FILTER_ENABLED:
+            img = cv2.filter2D(img, -1, SHARPEN_FILTER_KERNEL)
+
+        return save_new_image(image_info, convert_cv2_to_pil(img))
+
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except ValueError as e:
+        error = f"Valor inválido ao salvar '{image_info.get('path')}': {e}"
+    except KeyError as e:
+        error = f"Formato não suportado para '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+
+    image_info['status'] = False
+    image_info['error'] = error
+
+    return image_info, []
+
+def noise_images(images_info):
+    new_images_info = []
+    old_images_info = []
+    error_images_info = []
+
+    with Pool(processes=cpu_count()) as pool:
+        noise_result = pool.map(remove_noise_from_image, images_info)
+
+    for new_image_info, old_image_info in noise_result:
+        if new_image_info.get('status'):
+            new_images_info.append(new_image_info)
+            if isinstance(old_image_info, dict):
+                old_images_info.append(old_image_info)
+        else:
+            error_images_info.append(new_image_info)
+
+    return new_images_info, old_images_info, error_images_info
 
 # --action from_grid --rows 3 --cols 3
 
