@@ -16,6 +16,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 import numpy as np
 
+Image.MAX_IMAGE_PIXELS = None  # sem limite
+
 def import_image(image_info):
     src = image_info.get('external_source_path')
     dst = image_info.get('path')
@@ -65,7 +67,7 @@ def import_images(session_id, images_path):
 
     return images_info, error_images_info
 
-def import_images_from_pdf(session_id, pdfs_path, page_as_image = True, dpi = 300):
+def import_images_from_pdf(session_id, pdfs_path, page_as_image = False, dpi = 300):
     images_folder_path = get_session_images_path(session_id)
     images_info = []
 
@@ -118,12 +120,16 @@ def export_image(image_info):
     image_info['error'] = error
     return image_info
 
-def export_images(images_info, output_directory_path):
+def export_images(images_info, output_directory_path, with_id = False):
     success_images_info = []
     error_images_info = []
     output_directory_path = ensure_path(output_directory_path)
     for image_info in images_info:
-        name = image_info.get('external_source_path').name
+        if with_id:
+            name = f"{image_info.get('external_source_path').stem}--{image_info.get('id')}{image_info.get('external_source_path').suffix}"
+        else:
+            name = image_info.get('external_source_path').name
+            
         image_info['external_output_path'] = output_directory_path / name
 
     with ThreadPoolExecutor() as executor:
@@ -141,19 +147,33 @@ def save_new_image(image_info, new_img, format=None, dpi=None, quality=None, opt
     images_folder_path = get_session_images_path(image_info.get('session_id'))
     new_image_info = copy.deepcopy(image_info)
     new_image_info['id'] = new_uuid()
+    
     if image_info.get('id') is not None:
         new_image_info['old_id'] = image_info.get('id')
         old_image_info = image_info
-    new_image_info['path'] = images_folder_path / f'{new_image_info.get('id')}--{new_image_info.get('external_source_path').name}'
-    save_args = {
-        'optimize': optimize
-    }
+    
+    # decide extensão
+    if format:
+        ext = f".{format.lower()}"
+    else:
+        # usa a extensão que já estava salva (não a do external_source)
+        ext = image_info.get('path').suffix
+    
+    filename = f'{image_info.get("external_source_path").stem}{ext}'
+    id_filename = f"{new_image_info.get("id")}--{filename}"
+    new_image_info['path'] = images_folder_path / id_filename
+    
+    # 🔑 atualiza também o "external_source_path" para refletir o novo formato
+    new_image_info['external_source_path'] = images_folder_path / filename
+    
+    save_args = {'optimize': optimize}
     if format is not None:
         save_args['format'] = format
     if dpi is not None:
         save_args['dpi'] = (dpi, dpi)
     if quality is not None:
         save_args['quality'] = quality
+    
     new_img.save(new_image_info.get('path'), **save_args)
     new_image_info['status'] = True
 
@@ -265,6 +285,90 @@ def convert_to_px(value, scale, dpi = 300, total_size = None):
     except Exception as e:
         raise ValueError(f'Erro ao converter escala "{scale}": {e}')
 
+def trim_transparent_borders(config):
+    try:
+        image_info = config.get('image_info')
+        left = config.get('left')
+        right = config.get('right')
+        top = config.get('top')
+        bottom = config.get('bottom')
+        scale = config.get('scale')
+        type = config.get('type')
+        color = config.get('color')
+        dpi = config.get('dpi')
+
+        with Image.open(image_info.get('path')) as img:
+            # Garante que tenha alpha para processar
+            if img.mode in ("RGBA", "LA"):
+                # Pega o canal alpha
+                alpha = img.split()[-1]
+                # bounding box dos pixels não transparentes
+                bbox = alpha.getbbox()
+
+                if bbox:
+                    trimmed = img.crop(bbox)
+                else:
+                    # imagem é totalmente transparente → retorna ela mesmo
+                    trimmed = img
+            else:
+                # Sem canal alpha → retorna ela mesmo
+                trimmed = img
+
+            return save_new_image(image_info, trimmed)
+
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+
+    image_info['status'] = False
+    image_info['error'] = error
+
+    return image_info, []
+
+def remove_background_exact(config):
+    try:
+        image_info = config.get('image_info')
+        left = config.get('left')
+        right = config.get('right')
+        top = config.get('top')
+        bottom = config.get('bottom')
+        scale = config.get('scale')
+        type = config.get('type')
+        color = config.get('color')
+        dpi = config.get('dpi')
+
+        with Image.open(image_info.get('path')).convert("RGBA") as img:
+            datas = img.getdata()
+            new_data = []
+            for item in datas:
+                # item é (R,G,B,A) ou (R,G,B)
+                if item[0:3] == hex_to_rgb(color):  # compara só RGB
+                    new_data.append((255, 255, 255, 0))  # transparente
+                else:
+                    new_data.append(item)
+            img.putdata(new_data)
+
+            return save_new_image(image_info, img, format='PNG')
+
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+
+    image_info['status'] = False
+    image_info['error'] = error
+
+    return image_info, []
+
 def edit_border_image(config):
     image_info = config.get('image_info')
     left = config.get('left')
@@ -313,7 +417,7 @@ def edit_border_image(config):
 
     return image_info, []
     
-def edit_border_images(images_info, left, right, top, bottom, scale, type, color, dpi):
+def edit_border_images(images_info, left=0, right=0, top=0, bottom=0, scale='px', type = 'cut', color = None, dpi = 300):
     old_images_info = []
     new_images_info = []
     error_images_info = []
@@ -334,7 +438,13 @@ def edit_border_images(images_info, left, right, top, bottom, scale, type, color
         configs.append(config)
 
     with Pool(processes=cpu_count()) as pool:
-        cropped_results = pool.map(edit_border_image, configs)
+        match(type):
+            case 'cut':
+                cropped_results = pool.map(edit_border_image, configs)
+            case 'trim':
+                cropped_results = pool.map(trim_transparent_borders, configs)
+            case 'bg':
+                cropped_results = pool.map(remove_background_exact, configs)
 
     for new_image_info, old_image_info in cropped_results:
         if new_image_info.get('status'):
@@ -534,6 +644,7 @@ def get_from_grid(config):
                 original_name = image_info.get('path').stem
                 new_image_info = {
                     'external_source_path': ensure_path(f"{original_name}_{row}_{col}.png"),
+                    'path': ensure_path(f"{original_name}_{row}_{col}.png"),
                     'session_id': image_info.get('session_id')
                 }
                 new_image_info = save_new_image(new_image_info, cropped)
@@ -555,7 +666,8 @@ def images_from_grid(images_info, rows = 1, cols = 1):
 
     with Pool(processes=cpu_count()) as pool:
         cropped_results = pool.map(get_from_grid, configs)
-        new_images_info.extend(cropped_results)
+
+    new_images_info = [img[0] for sublist in cropped_results for img in sublist]
 
     return new_images_info
 
@@ -571,7 +683,10 @@ def quicklook_images(images_info):
 
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip("#")
-    if len(hex_color) != 6:
+    if len(hex_color) == 3:
+        # duplicar cada caractere, ex: "F3A" -> "FF33AA"
+        hex_color = ''.join(c*2 for c in hex_color)
+    elif len(hex_color) != 6:
         raise ValueError(f"Cor hexadecimal inválida: {hex_color}")
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 

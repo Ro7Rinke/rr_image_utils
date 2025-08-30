@@ -2,7 +2,7 @@ import shlex
 import sys
 from input_parser import parse_args
 from debug_log import print_log
-from image_utils import convert_images_to_jpeg, export_images, export_to_pdf, export_to_word, images_from_grid, import_images, import_images_from_pdf, noise_images, quicklook_images, resize_images
+from image_utils import convert_images_to_jpeg, edit_border_images, export_images, export_to_pdf, export_to_word, images_from_grid, import_images, import_images_from_pdf, noise_images, quicklook_images, resize_images
 from session import clear_temp, get_session
 
 if __name__ == "__main__":
@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     def save_images(input_dict):
         global old_images_info, all_images_info, error_images_info, selected_images
-        params_filter = ['output_directory_path']
+        params_filter = ['output_directory_path', 'with_id']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_success_images_info, result_error_images_info = export_images(all_images_info, **params)
         print_log(result_success_images_info, title='Salvos com sucesso', level=1)
@@ -93,6 +93,17 @@ if __name__ == "__main__":
         error_images_info = result_error_images_info
         old_images_info = result_old_images_info
 
+    def crop(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
+        params_filter = ["left", "right", "top", "bottom", "scale", "type", "color", "dpi"]
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        result_new_images_info, result_old_images_info, result_error_images_info = edit_border_images(all_images_info, **params)
+        print_log(result_new_images_info, title='Recortadas com sucesso', level=1)
+        print_log(result_error_images_info, title='Erros ao recortar', type='error', level=1)
+        all_images_info = result_new_images_info
+        error_images_info = result_error_images_info
+        old_images_info = result_old_images_info
+
     args_string = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
 
     args_string = args_string or input()
@@ -103,7 +114,7 @@ if __name__ == "__main__":
     is_pdf = args_dict.get('pdf')
     images_path = args_dict.get('images_path', [])
     images_path = [images_path] if isinstance(images_path, str) else images_path
-    params_filter = ['dpi']
+    params_filter = ['dpi', 'page_as_image']
     params = {key: args_dict[key] for key in params_filter if key in args_dict}
 
     session_id = get_session(session_id)
@@ -114,9 +125,6 @@ if __name__ == "__main__":
     while True:
         input_string = input()
         input_dict = parse_args(input_string)
-
-        if input_dict.get('clear_all'):
-            clear_temp()
 
         if input_dict.get('action') is not None:
             match input_dict.get('action'):
@@ -136,8 +144,13 @@ if __name__ == "__main__":
                     to_jpeg(input_dict)
                 case 'remove_noise':
                     remove_noise(input_dict)
+                case 'crop':
+                    crop(input_dict)
                 case _:
                     print_log('Invalid action', type='error', level=1)
+
+        if input_dict.get('clear_all'):
+            clear_temp()
 
         if input_dict.get('exit'):
             break
