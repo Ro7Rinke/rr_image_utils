@@ -197,7 +197,7 @@ def resize_image(config):
             else:
                 match scale:
                     case 'px':
-                        pts_divider = 72
+                        pts_divider = dpi
                     case 'mm':
                         pts_divider = 25.4
                     case 'cm':
