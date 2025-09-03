@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     def save_images(input_dict):
         global old_images_info, all_images_info, error_images_info, selected_images
-        params_filter = ['output_directory_path', 'with_id']
+        params_filter = ['output_directory_path', 'with_id', 'prefix', 'sufix']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_success_images_info, result_error_images_info = export_images(all_images_info, **params)
         print_log(result_success_images_info, title='Salvos com sucesso', level=1)

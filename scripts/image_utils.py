@@ -120,7 +120,7 @@ def export_image(image_info):
     image_info['error'] = error
     return image_info
 
-def export_images(images_info, output_directory_path, with_id = False):
+def export_images(images_info, output_directory_path, with_id = False, prefix = None, sufix = None):
     success_images_info = []
     error_images_info = []
     output_directory_path = ensure_path(output_directory_path)
@@ -129,6 +129,12 @@ def export_images(images_info, output_directory_path, with_id = False):
             name = f"{image_info.get('external_source_path').stem}--{image_info.get('id')}{image_info.get('external_source_path').suffix}"
         else:
             name = image_info.get('external_source_path').name
+        
+        if prefix:
+            name = f'{prefix}{name}'
+        
+        if sufix:
+            name = f'{name}{sufix}'
             
         image_info['external_output_path'] = output_directory_path / name
 
