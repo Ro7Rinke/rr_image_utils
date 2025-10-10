@@ -631,18 +631,21 @@ def get_from_grid(config):
     cols = config.get('cols')
     new_images_info = []
 
-    # try:
     with Image.open(image_info.get('path')) as img:
         img_width, img_height = img.size
-        cell_width = img_width // cols
-        cell_height = img_height // rows
+        cell_width = img_width / cols
+        cell_height = img_height / rows
 
         for row in range(rows):
             for col in range(cols):
-                left = col * cell_width
-                upper = row * cell_height
-                right = left + cell_width
-                lower = upper + cell_height
+                left = round(col * cell_width)
+                upper = round(row * cell_height)
+                right = round((col + 1) * cell_width)
+                lower = round((row + 1) * cell_height)
+
+                # evita sair da imagem por causa do arredondamento
+                right = min(right, img_width)
+                lower = min(lower, img_height)
 
                 box = (left, upper, right, lower)
                 cropped = img.crop(box)
