@@ -2,7 +2,7 @@ import shlex
 import sys
 from input_parser import parse_args
 from debug_log import print_log
-from image_utils import convert_images_to_jpeg, edit_border_images, export_images, export_to_pdf, export_to_word, images_from_grid, import_images, import_images_from_pdf, noise_images, quicklook_images, resize_images
+from image_utils import convert_images_to_avif, convert_images_to_jpeg, edit_border_images, export_images, export_to_pdf, export_to_word, images_from_grid, import_images, import_images_from_pdf, noise_images, quicklook_images, resize_images
 from session import clear_temp, get_session
 
 if __name__ == "__main__":
@@ -82,6 +82,17 @@ if __name__ == "__main__":
         error_images_info = result_error_images_info
         old_images_info = result_old_images_info
 
+    def to_avif(input_dict):
+        global old_images_info, all_images_info, error_images_info, selected_images
+        params_filter = ['dpi', 'quality', 'speed', 'no_alpha', 'subsampling']
+        params = {key: input_dict[key] for key in params_filter if key in input_dict}
+        result_new_images_info, result_old_images_info, result_error_images_info = convert_images_to_avif(all_images_info, **params)
+        print_log(result_new_images_info, title='Convertidas para AVIF com sucesso', level=1)
+        print_log(result_error_images_info, title='Erros ao converter para AVIF', type='error', level=1)
+        all_images_info = result_new_images_info
+        error_images_info = result_error_images_info
+        old_images_info = result_old_images_info
+
     def remove_noise(input_dict):
         global old_images_info, all_images_info, error_images_info, selected_images
         params_filter = []
@@ -142,6 +153,8 @@ if __name__ == "__main__":
                     preview_images(input_dict)
                 case 'to_jpeg':
                     to_jpeg(input_dict)
+                case 'to_avif':
+                    to_avif(input_dict)
                 case 'remove_noise':
                     remove_noise(input_dict)
                 case 'crop':
@@ -157,7 +170,8 @@ if __name__ == "__main__":
 
 
 
-
+# L: 323 R: 191 T: 176 B: 108
+# L: 470 R: 248 T: 378 B: 373 16.23 x 25.23 (27.726% X 26.952%) - 23.8 x 16
 
 
 # /Users/ro7rinke/Library/CloudStorage/GoogleDrive-ro7rinke2@gmail.com/My Drive/BoardGame/Brass Birmingham/final-print/brass-print.pdf

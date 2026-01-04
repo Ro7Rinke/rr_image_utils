@@ -3,6 +3,7 @@ import subprocess
 import cv2
 import fitz
 import io
+import pillow_avif
 from multiprocessing import Pool, cpu_count
 from debug_log import print_log
 from session import get_session_images_path, new_uuid, copy_file, ensure_path
@@ -148,7 +149,7 @@ def export_images(images_info, output_directory_path, with_id = False, prefix = 
 
     return success_images_info, error_images_info
 
-def save_new_image(image_info, new_img, format=None, dpi=None, quality=None, optimize=True):
+def save_new_image(image_info, new_img, format=None, dpi=None, quality=None, optimize=True, extra_args=None):
     old_image_info = None
     images_folder_path = get_session_images_path(image_info.get('session_id'))
     new_image_info = copy.deepcopy(image_info)
@@ -179,6 +180,8 @@ def save_new_image(image_info, new_img, format=None, dpi=None, quality=None, opt
         save_args['dpi'] = (dpi, dpi)
     if quality is not None:
         save_args['quality'] = quality
+    if extra_args is not None:
+        save_args |= extra_args
     
     new_img.save(new_image_info.get('path'), **save_args)
     new_image_info['status'] = True
@@ -847,6 +850,82 @@ def noise_images(images_info):
         noise_result = pool.map(remove_noise_from_image, images_info)
 
     for new_image_info, old_image_info in noise_result:
+        if new_image_info.get('status'):
+            new_images_info.append(new_image_info)
+            if isinstance(old_image_info, dict):
+                old_images_info.append(old_image_info)
+        else:
+            error_images_info.append(new_image_info)
+
+    return new_images_info, old_images_info, error_images_info
+
+def has_alpha(img: Image.Image) -> bool:
+    return img.mode in ("RGBA", "LA") or (
+        img.mode == "P" and "transparency" in img.info
+    )
+
+def convert_to_avif(config):
+    image_info = config.get('image_info')
+    no_alpha = config.get('no_alpha')
+    dpi = config.get('dpi')
+    quality = config.get("quality")
+    speed = config.get("speed")
+    subsampling = config.get("subsampling")
+
+    try:
+        with Image.open(image_info.get('path')) as img:
+
+            if not has_alpha(img) or no_alpha:
+                img = img.convert("RGB")
+            else:
+                img = img.convert("RGBA")
+
+            extra_args = {
+                'speed': speed,
+                'subsampling': subsampling
+            }
+
+            return save_new_image(image_info, img, format="AVIF", dpi=dpi, quality=quality, extra_args=extra_args)
+            
+    except FileNotFoundError:
+        error = f"Arquivo não encontrado: {image_info.get('path')}"
+    except UnidentifiedImageError:
+        error = f"Arquivo não é uma imagem válida: {image_info.get('path')}"
+    except OSError as e:
+        error = f"Falha ao processar imagem '{image_info.get('path')}': {e}"
+    except ValueError as e:
+        error = f"Valor inválido ao salvar '{image_info.get('path')}': {e}"
+    except KeyError as e:
+        error = f"Formato não suportado para '{image_info.get('path')}': {e}"
+    except Exception as e:
+        error = f"Erro inesperado com '{image_info.get('path')}': {e}"
+
+    image_info['status'] = False
+    image_info['error'] = error
+
+    return image_info
+
+def convert_images_to_avif(images_info, dpi=None, quality=85, no_alpha=False, speed=6, subsampling="4:4:4"):
+    new_images_info = []
+    old_images_info = []
+    error_images_info = []
+    configs = []
+
+    for image_info in images_info:
+        config = {
+            'image_info': image_info,
+            'dpi': dpi,
+            'quality': quality,
+            'no_alpha': no_alpha,
+            'speed': speed,
+            'subsampling': subsampling
+        }
+        configs.append(config)
+
+    with Pool(processes=cpu_count()) as pool:
+        converted_results = pool.map(convert_to_avif, configs)
+
+    for new_image_info, old_image_info in converted_results:
         if new_image_info.get('status'):
             new_images_info.append(new_image_info)
             if isinstance(old_image_info, dict):
