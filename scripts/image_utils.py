@@ -28,16 +28,25 @@ def import_image(image_info):
     return image_info
 
 def get_images_path_from_dirs(dir_images_path):
-    new_images_path = []
-    for image_path in dir_images_path:
-        image_path = ensure_path(image_path)
-        if image_path.is_dir():
-            all_files = [p for p in image_path.iterdir() if p.is_file() and not p.name.startswith('.')]
-            new_images_path.extend(all_files)
+    results = []
+
+    for root in dir_images_path:
+        root = ensure_path(root)
+
+        if root.is_dir():
+            for file in root.rglob("*"):
+                if file.is_file() and not file.name.startswith("."):
+                    results.append({
+                        "path": file,
+                        "relative_path": file.relative_to(root)
+                    })
         else:
-            new_images_path.append(image_path)
-    
-    return new_images_path
+            results.append({
+                "path": root,
+                "relative_path": root.name
+            })
+
+    return results
 
 def import_images(session_id, images_path):
     images_folder_path = get_session_images_path(session_id)
@@ -47,15 +56,20 @@ def import_images(session_id, images_path):
 
     images_path = get_images_path_from_dirs(images_path)
 
-    for image_path in images_path:
-        image_path = ensure_path(image_path)
+    for item in images_path:
+        image_path = ensure_path(item["path"])
+        relative_path = item["relative_path"]
+
         image_id = new_uuid()
+
         image_info = {
-            'external_source_path': image_path,
-            'id': image_id,
-            'session_id': session_id,
-            'path': images_folder_path / f'{image_id}--{image_path.name}'
+            "external_source_path": image_path,
+            "relative_path": relative_path,  # 👈 NOVO
+            "id": image_id,
+            "session_id": session_id,
+            "path": images_folder_path / f"{image_id}--{image_path.name}"
         }
+
         import_images_info.append(image_info)
     
     with ThreadPoolExecutor() as executor:
@@ -126,18 +140,23 @@ def export_images(images_info, output_directory_path, with_id = False, prefix = 
     error_images_info = []
     output_directory_path = ensure_path(output_directory_path)
     for image_info in images_info:
+        relative_path = image_info.get("relative_path")
+
         if with_id:
-            name = f"{image_info.get('external_source_path').stem}--{image_info.get('id')}{image_info.get('external_source_path').suffix}"
+            filename = f"{relative_path.stem}--{image_info['id']}{relative_path.suffix}"
+            output_path = output_directory_path / relative_path.parent / filename
         else:
-            name = image_info.get('external_source_path').name
-        
+            output_path = output_directory_path / relative_path
+
         if prefix:
-            name = f'{prefix}{name}'
-        
+            output_path = output_path.with_name(f"{prefix}{output_path.name}")
+
         if sufix:
-            name = f'{name}{sufix}'
-            
-        image_info['external_output_path'] = output_directory_path / name
+            output_path = output_path.with_name(f"{output_path.stem}{sufix}{output_path.suffix}")
+
+        ensure_path(output_path.parent).mkdir(parents=True, exist_ok=True)
+
+        image_info["external_output_path"] = output_path
 
     with ThreadPoolExecutor() as executor:
         copy_results = list(executor.map(export_image, images_info))
@@ -172,6 +191,9 @@ def save_new_image(image_info, new_img, format=None, dpi=None, quality=None, opt
     
     # 🔑 atualiza também o "external_source_path" para refletir o novo formato
     new_image_info['external_source_path'] = images_folder_path / filename
+    if "relative_path" in image_info:
+        old_relative = image_info["relative_path"]
+        new_image_info["relative_path"] = old_relative.with_suffix(ext)
     
     save_args = {'optimize': optimize}
     if format is not None:
