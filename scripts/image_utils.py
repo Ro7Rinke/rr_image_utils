@@ -97,12 +97,14 @@ def import_images_from_pdf(session_id, pdfs_path, page_as_image = False, dpi = 3
             if page_as_image:
                 pix = page.get_pixmap(dpi=dpi)
                 image_id = new_uuid()
+                relative_path = ensure_path(f"{pdf_path.stem}_{page_number}.png")
                 image_info = {
-                    'external_source_path': images_folder_path / f'{pdf_path.stem}_{page_number}.png',
-                    'id': image_id,
-                    'session_id': session_id,
-                    'path': images_folder_path / f'{image_id}--{pdf_path.stem}_{page_number}.png'
-                }
+                'external_source_path': images_folder_path / relative_path,
+                'relative_path': relative_path,
+                'id': image_id,
+                'session_id': session_id,
+                'path': images_folder_path / f'{image_id}--{relative_path.name}'
+            }
                 pix.save(image_info.get('path'))
                 images_info.append(image_info)
             else:
@@ -114,11 +116,13 @@ def import_images_from_pdf(session_id, pdfs_path, page_as_image = False, dpi = 3
                     image_bytes = base_image['image']
                     image_ext = base_image['ext']
                     image_id = new_uuid()
+                    relative_path = ensure_path(f"{pdf_path.stem}_{page_number}.{image_ext}")
                     image_info = {
-                        'external_source_path': images_folder_path / f'{pdf_path.stem}_{page_number}.{image_ext}',
+                        'external_source_path': images_folder_path / relative_path,
+                        'relative_path': relative_path,
                         'id': image_id,
                         'session_id': session_id,
-                        'path': images_folder_path / f'{image_id}--{pdf_path.stem}_{page_number}.{image_ext}'
+                        'path': images_folder_path / f'{image_id}--{relative_path.name}'
                     }
                     with open(image_info.get('path'), 'wb') as file:
                         file.write(image_bytes)
@@ -372,16 +376,26 @@ def remove_background_exact(config):
         type = config.get('type')
         color = config.get('color')
         dpi = config.get('dpi')
+        threshold = config.get('threshold')
+
+        target_rgb = hex_to_rgb(color)
 
         with Image.open(image_info.get('path')).convert("RGBA") as img:
             datas = img.getdata()
             new_data = []
+
             for item in datas:
-                # item é (R,G,B,A) ou (R,G,B)
-                if item[0:3] == hex_to_rgb(color):  # compara só RGB
-                    new_data.append((255, 255, 255, 0))  # transparente
+                r, g, b, a = item
+
+                dist = ((r - target_rgb[0]) ** 2 +
+                        (g - target_rgb[1]) ** 2 +
+                        (b - target_rgb[2]) ** 2) ** 0.5
+
+                if dist <= threshold:
+                    new_data.append((255, 255, 255, 0))
                 else:
                     new_data.append(item)
+
             img.putdata(new_data)
 
             return save_new_image(image_info, img, format='PNG')
@@ -448,7 +462,7 @@ def edit_border_image(config):
 
     return image_info, []
     
-def edit_border_images(images_info, left=0, right=0, top=0, bottom=0, scale='px', type = 'cut', color = None, dpi = 300):
+def edit_border_images(images_info, left=0, right=0, top=0, bottom=0, scale='px', type = 'cut', color = None, dpi = 300, threshold = 0):
     old_images_info = []
     new_images_info = []
     error_images_info = []
@@ -464,7 +478,8 @@ def edit_border_images(images_info, left=0, right=0, top=0, bottom=0, scale='px'
             'scale': scale,
             'type': type,
             'color': color,
-            'dpi': dpi
+            'dpi': dpi,
+            'threshold': threshold
         }
         configs.append(config)
 
@@ -676,9 +691,18 @@ def get_from_grid(config):
                 cropped = img.crop(box)
 
                 original_name = image_info.get('path').stem
+
+                parent_relative = (
+                    ensure_path(image_info["relative_path"]).parent
+                    if image_info.get("relative_path")
+                    else ensure_path("")
+                )
+                relative_path = parent_relative / f"{original_name}_{row}_{col}.png"
+
                 new_image_info = {
-                    'external_source_path': ensure_path(f"{original_name}_{row}_{col}.png"),
-                    'path': ensure_path(f"{original_name}_{row}_{col}.png"),
+                    'external_source_path': relative_path,
+                    'path': relative_path,
+                    'relative_path': relative_path,
                     'session_id': image_info.get('session_id')
                 }
                 new_image_info = save_new_image(new_image_info, cropped)
@@ -893,14 +917,24 @@ def convert_to_avif(config):
     quality = config.get("quality")
     speed = config.get("speed")
     subsampling = config.get("subsampling")
+    color = config.get("color")
 
     try:
         with Image.open(image_info.get('path')) as img:
 
-            if not has_alpha(img) or no_alpha:
+            if not has_alpha(img):
                 img = img.convert("RGB")
             else:
-                img = img.convert("RGBA")
+                if no_alpha:
+                    if color:
+                        bg_rgb = hex_to_rgb(color)
+                        background = Image.new("RGB", img.size, bg_rgb)
+                        background.paste(img, mask=img.split()[-1])
+                        img = background
+                    else:
+                        img = img.convert("RGB")
+                else:
+                    img = img.convert("RGBA")
 
             extra_args = {
                 'speed': speed,
@@ -927,7 +961,7 @@ def convert_to_avif(config):
 
     return image_info
 
-def convert_images_to_avif(images_info, dpi=None, quality=85, no_alpha=False, speed=6, subsampling="4:4:4"):
+def convert_images_to_avif(images_info, dpi=None, quality=85, no_alpha=False, speed=6, subsampling="4:4:4", color=None):
     new_images_info = []
     old_images_info = []
     error_images_info = []
@@ -940,7 +974,8 @@ def convert_images_to_avif(images_info, dpi=None, quality=85, no_alpha=False, sp
             'quality': quality,
             'no_alpha': no_alpha,
             'speed': speed,
-            'subsampling': subsampling
+            'subsampling': subsampling,
+            'color': color
         }
         configs.append(config)
 
@@ -972,7 +1007,7 @@ def convert_images_to_avif(images_info, dpi=None, quality=85, no_alpha=False, sp
 
 
 
-
+# python scripts/rr_image_utils.py --images_path 
 
 
 

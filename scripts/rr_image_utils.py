@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     def to_avif(input_dict):
         global old_images_info, all_images_info, error_images_info, selected_images
-        params_filter = ['dpi', 'quality', 'speed', 'no_alpha', 'subsampling']
+        params_filter = ['dpi', 'quality', 'speed', 'no_alpha', 'subsampling', 'color']
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_new_images_info, result_old_images_info, result_error_images_info = convert_images_to_avif(all_images_info, **params)
         print_log(result_new_images_info, title='Convertidas para AVIF com sucesso', level=1)
@@ -106,7 +106,7 @@ if __name__ == "__main__":
 
     def crop(input_dict):
         global old_images_info, all_images_info, error_images_info, selected_images
-        params_filter = ["left", "right", "top", "bottom", "scale", "type", "color", "dpi"]
+        params_filter = ["left", "right", "top", "bottom", "scale", "type", "color", "dpi", "threshold"]
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
         result_new_images_info, result_old_images_info, result_error_images_info = edit_border_images(all_images_info, **params)
         print_log(result_new_images_info, title='Recortadas com sucesso', level=1)
