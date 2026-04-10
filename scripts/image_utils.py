@@ -4,11 +4,12 @@ import cv2
 import fitz
 import io
 import pillow_avif
+import math
 from multiprocessing import Pool, cpu_count
 from debug_log import print_log
 from session import get_session_images_path, new_uuid, copy_file, ensure_path
 from concurrent.futures import ThreadPoolExecutor
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError, ImageFile, ImageDraw
 from docx import Document
 from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -18,6 +19,7 @@ from reportlab.lib.utils import ImageReader
 import numpy as np
 
 Image.MAX_IMAGE_PIXELS = None  # sem limite
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def import_image(image_info):
     src = image_info.get('external_source_path')
@@ -197,7 +199,7 @@ def save_new_image(image_info, new_img, format=None, dpi=None, quality=None, opt
     new_image_info['external_source_path'] = images_folder_path / filename
     if "relative_path" in image_info:
         old_relative = image_info["relative_path"]
-        new_image_info["relative_path"] = old_relative.with_suffix(ext)
+        new_image_info["relative_path"] = ensure_path(old_relative).with_suffix(ext)
     
     save_args = {'optimize': optimize}
     if format is not None:
@@ -991,6 +993,146 @@ def convert_images_to_avif(images_info, dpi=None, quality=85, no_alpha=False, sp
             error_images_info.append(new_image_info)
 
     return new_images_info, old_images_info, error_images_info
+
+def create_grid_image(config):
+    images = config.get('images')
+    cols = config.get('cols')
+    guide = config.get('draw_guides', False)
+    guide_color = config.get('guide_color', '#000000')
+    guide_thickness = config.get('guide_thickness', 2)
+    padding = config.get('padding', 0)
+    margin = config.get('margin', 0)
+    guide_size = config.get('guide_size', 10)
+
+    total_images = len(images)
+    used_rows = math.ceil(total_images / cols)
+
+    # tamanho base
+    with Image.open(images[0].get('path')) as sample:
+        img_w, img_h = sample.size
+
+    cell_w = img_w + padding * 2
+    cell_h = img_h + padding * 2
+
+    grid_w = cols * cell_w + margin * 2
+    grid_h = used_rows * cell_h + margin * 2
+
+    grid_img = Image.new("RGB", (grid_w, grid_h), (255, 255, 255))
+    draw = ImageDraw.Draw(grid_img)
+    guide_rgb = hex_to_rgb(guide_color)
+
+    # ------------------------
+    # COLAR IMAGENS
+    # ------------------------
+    for index, image_info in enumerate(images):
+        row = index // cols
+        col = index % cols
+
+        x = margin + col * cell_w + padding
+        y = margin + row * cell_h + padding
+
+        with Image.open(image_info.get('path')) as img:
+            if img.mode in ("RGBA", "LA"):
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[-1])
+                img = bg
+            else:
+                img = img.convert("RGB")
+
+            grid_img.paste(img, (x, y))
+
+    # ------------------------
+    # DESENHAR MARCAS (CANTOS / INTERSECÇÕES)
+    # ------------------------
+    if guide:
+        corner_counts = {}
+        
+        # 1. Mapeia os 4 cantos de cada célula e conta quantas vezes cada ponto é tocado
+        for index in range(total_images):
+            row = index // cols
+            col = index % cols
+
+            x0 = margin + col * cell_w
+            y0 = margin + row * cell_h
+            x1 = x0 + cell_w
+            y1 = y0 + cell_h
+
+            corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+            for pt in corners:
+                corner_counts[pt] = corner_counts.get(pt, 0) + 1
+
+        # 2. Desenha a marca de corte apenas nos pontos compartilhados por 2 ou mais células
+        for (cx, cy), count in corner_counts.items():
+            if count > 1:
+                # Linha vertical da cruz
+                draw.line(
+                    [(cx, cy - guide_size), (cx, cy + guide_size)],
+                    fill=guide_rgb,
+                    width=guide_thickness
+                )
+                # Linha horizontal da cruz
+                draw.line(
+                    [(cx - guide_size, cy), (cx + guide_size, cy)],
+                    fill=guide_rgb,
+                    width=guide_thickness
+                )
+
+    return grid_img
+
+def images_to_grid(images_info, rows=3, cols=3,
+                   no_guides=False,
+                   guide_color='#000000',
+                   guide_thickness=2,
+                   guide_size=10,
+                   padding=0,
+                   margin=0,
+                   file_name="grid"):
+
+    draw_guides = False if no_guides else True
+
+    new_images_info = []
+    old_images_info = []
+
+    per_page = rows * cols
+
+    chunks = [
+        images_info[i:i + per_page]
+        for i in range(0, len(images_info), per_page)
+    ]
+
+    for i, chunk in enumerate(chunks, start=1):
+
+        config = {
+            'images': chunk,
+            'cols': cols,
+            'draw_guides': draw_guides,
+            'guide_color': guide_color,
+            'guide_thickness': guide_thickness,
+            'guide_size': guide_size,
+            'padding': padding,
+            'margin': margin
+        }
+
+        grid_img = create_grid_image(config)
+
+        base_info = chunk[0].copy()
+        base_info["name"] = f"{file_name}_{i}"
+
+        # 🔥 gera nome consistente
+        output_name = f"{file_name}_{i}"
+
+        # 🔥 chama função existente
+        new_image_info, old_image_info = save_new_image(base_info, grid_img)
+
+        # 🔥 FORÇA o nome correto (sem depender do save_new_image)
+        new_image_info["name"] = output_name
+
+        new_images_info.append(new_image_info)
+
+        if old_image_info:
+            old_images_info.append(old_image_info)
+
+    return new_images_info, old_images_info, []
 
 # --action from_grid --rows 3 --cols 3
 
