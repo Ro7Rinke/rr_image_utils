@@ -999,7 +999,7 @@ def create_grid_image(config):
     cols = config.get('cols')
     guide = config.get('draw_guides', False)
     guide_color = config.get('guide_color', '#000000')
-    guide_thickness = config.get('guide_thickness', 2)
+    guide_thickness = config.get('guide_thickness', 3)
     padding = config.get('padding', 0)
     margin = config.get('margin', 0)
     guide_size = config.get('guide_size', 10)
@@ -1007,10 +1007,11 @@ def create_grid_image(config):
     total_images = len(images)
     used_rows = math.ceil(total_images / cols)
 
-    # tamanho base
+    # Pegamos o tamanho da primeira imagem para definir a grade
     with Image.open(images[0].get('path')) as sample:
         img_w, img_h = sample.size
 
+    # A célula total inclui a imagem + o padding ao redor dela
     cell_w = img_w + padding * 2
     cell_h = img_h + padding * 2
 
@@ -1028,8 +1029,9 @@ def create_grid_image(config):
         row = index // cols
         col = index % cols
 
-        x = margin + col * cell_w + padding
-        y = margin + row * cell_h + padding
+        # X e Y representam o início da célula (incluindo margem e padding)
+        x = margin + (col * cell_w) + padding
+        y = margin + (row * cell_h) + padding
 
         with Image.open(image_info.get('path')) as img:
             if img.mode in ("RGBA", "LA"):
@@ -1038,51 +1040,67 @@ def create_grid_image(config):
                 img = bg
             else:
                 img = img.convert("RGB")
-
-            grid_img.paste(img, (x, y))
+            
+            grid_img.paste(img, (int(x), int(y)))
 
     # ------------------------
-    # DESENHAR MARCAS (CANTOS / INTERSECÇÕES)
+    # DESENHAR MARCAS (CORREÇÃO DE CENTRALIZAÇÃO)
     # ------------------------
     if guide:
-        corner_counts = {}
-        
-        # 1. Mapeia os 4 cantos de cada célula e conta quantas vezes cada ponto é tocado
+        # Usamos um set para evitar desenhar a mesma cruz duas vezes 
+        # nos pontos de intersecção compartilhados
+        drawn_points = set()
+
         for index in range(total_images):
             row = index // cols
             col = index % cols
 
-            x0 = margin + col * cell_w
-            y0 = margin + row * cell_h
+            # Coordenadas dos 4 cantos da CÉLULA (onde as linhas de corte devem se cruzar)
+            x0 = margin + (col * cell_w)
+            y0 = margin + (row * cell_h)
             x1 = x0 + cell_w
             y1 = y0 + cell_h
 
-            corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
-            for pt in corners:
-                corner_counts[pt] = corner_counts.get(pt, 0) + 1
+            # Cantos para verificar intersecção: Inferior Direito, Inferior Esquerdo e Superior Direito
+            # O Superior Esquerdo de uma imagem é o Inferior Direito de outra.
+            check_points = []
+            
+            # Se houver imagem à direita, marca o ponto vertical entre elas
+            if col < cols - 1 and (index + 1) < total_images:
+                check_points.append((x1, y0 + cell_h // 2)) # Marca lateral (opcional)
+            
+            # Se houver imagem abaixo, marca o ponto horizontal entre elas
+            if (index + cols) < total_images:
+                check_points.append((x0 + cell_w // 2, y1)) # Marca inferior (opcional)
 
-        # 2. Desenha a marca de corte apenas nos pontos compartilhados por 2 ou mais células
-        for (cx, cy), count in corner_counts.items():
-            if count > 1:
-                # Linha vertical da cruz
-                draw.line(
-                    [(cx, cy - guide_size), (cx, cy + guide_size)],
-                    fill=guide_rgb,
-                    width=guide_thickness
-                )
-                # Linha horizontal da cruz
-                draw.line(
-                    [(cx - guide_size, cy), (cx + guide_size, cy)],
-                    fill=guide_rgb,
-                    width=guide_thickness
-                )
+            # Lógica de Intersecção de Quinas (A que você pediu: Cruz nos encontros)
+            # Verificamos os 4 cantos de cada célula
+            for cx, cy in [(x1, y1), (x1, y0), (x0, y1)]:
+                # Se o ponto estiver dentro dos limites internos da grade (não for borda externa)
+                if margin < cx < (grid_w - margin) or margin < cy < (grid_h - margin):
+                    if (cx, cy) not in drawn_points:
+                        
+                        # Desenha a Cruz (+)
+                        # Linha Vertical
+                        draw.line(
+                            [(cx, cy - guide_size), (cx, cy + guide_size)],
+                            fill=guide_rgb,
+                            width=guide_thickness
+                        )
+                        # Linha Horizontal
+                        draw.line(
+                            [(cx - guide_size, cy), (cx + guide_size, cy)],
+                            fill=guide_rgb,
+                            width=guide_thickness
+                        )
+                        drawn_points.add((cx, cy))
 
     return grid_img
 
 def images_to_grid(images_info, rows=3, cols=3,
                    no_guides=False,
                    guide_color='#000000',
-                   guide_thickness=2,
+                   guide_thickness=3,
                    guide_size=10,
                    padding=0,
                    margin=0,
@@ -1101,6 +1119,7 @@ def images_to_grid(images_info, rows=3, cols=3,
     ]
 
     for i, chunk in enumerate(chunks, start=1):
+        output_name = f"{file_name}_{i}"
 
         config = {
             'images': chunk,
@@ -1113,19 +1132,19 @@ def images_to_grid(images_info, rows=3, cols=3,
             'margin': margin
         }
 
-        grid_img = create_grid_image(config)
 
         base_info = chunk[0].copy()
-        base_info["name"] = f"{file_name}_{i}"
+        
+        orig_path = base_info.get("external_source_path") or base_info.get("path")
+        ext = ensure_path(orig_path).suffix if orig_path else ".avif"
+        base_info["relative_path"] = ensure_path(f"{output_name}{ext}")
+        base_info["external_source_path"] = ensure_path(f"/{output_name}{ext}")
 
-        # 🔥 gera nome consistente
-        output_name = f"{file_name}_{i}"
-
-        # 🔥 chama função existente
+        grid_img = create_grid_image(config)
+        
         new_image_info, old_image_info = save_new_image(base_info, grid_img)
-
-        # 🔥 FORÇA o nome correto (sem depender do save_new_image)
         new_image_info["name"] = output_name
+        new_image_info["relative_path"] = ensure_path(f"{output_name}{ext}")
 
         new_images_info.append(new_image_info)
 
