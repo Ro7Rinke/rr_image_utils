@@ -742,7 +742,7 @@ def quicklook_images(images_info):
     subprocess.run(["qlmanage", "-p"] + paths)
 
 def hex_to_rgb(hex_color):
-    hex_color = hex_color.lstrip("#")
+    hex_color = str(hex_color).lstrip("#")
     if len(hex_color) == 3:
         # duplicar cada caractere, ex: "F3A" -> "FF33AA"
         hex_color = ''.join(c*2 for c in hex_color)
@@ -1003,6 +1003,14 @@ def create_grid_image(config):
     padding = config.get('padding', 0)
     margin = config.get('margin', 0)
     guide_size = config.get('guide_size', 10)
+    
+    # --- NOVOS PARÂMETROS ---
+    guide_extend = config.get('guide_extend', False)
+    guide_outward_size = config.get('guide_outward_size', 10)
+    
+    draw_border = config.get('draw_border', False)
+    border_color = config.get('border_color', '#777777')
+    border_thickness = config.get('border_thickness', 1)
 
     total_images = len(images)
     used_rows = math.ceil(total_images / cols)
@@ -1011,27 +1019,34 @@ def create_grid_image(config):
     with Image.open(images[0].get('path')) as sample:
         img_w, img_h = sample.size
 
-    # A célula total inclui a imagem + o padding ao redor dela
-    cell_w = img_w + padding * 2
-    cell_h = img_h + padding * 2
+    effective_border = border_thickness if draw_border else 0
+
+    # A célula agora considera o espaço extra da borda para que o centro das cruzes 
+    # fique exatamente no ponto médio entre as bordas de duas cartas vizinhas
+    cell_w = img_w + (padding * 2) + (effective_border * 2)
+    cell_h = img_h + (padding * 2) + (effective_border * 2)
 
     grid_w = cols * cell_w + margin * 2
     grid_h = used_rows * cell_h + margin * 2
 
     grid_img = Image.new("RGB", (grid_w, grid_h), (255, 255, 255))
     draw = ImageDraw.Draw(grid_img)
+    
     guide_rgb = hex_to_rgb(guide_color)
+    if draw_border:
+        card_border_rgb = hex_to_rgb(border_color)
 
     # ------------------------
-    # COLAR IMAGENS
+    # COLAR IMAGENS E BORDAS
     # ------------------------
     for index, image_info in enumerate(images):
         row = index // cols
         col = index % cols
 
-        # X e Y representam o início da célula (incluindo margem e padding)
-        x = margin + (col * cell_w) + padding
-        y = margin + (row * cell_h) + padding
+        # O X e Y agora consideram que a imagem começa depois da margem, 
+        # do padding e da própria borda que será desenhada
+        x = margin + (col * cell_w) + padding + effective_border
+        y = margin + (row * cell_h) + padding + effective_border
 
         with Image.open(image_info.get('path')) as img:
             if img.mode in ("RGBA", "LA"):
@@ -1042,58 +1057,66 @@ def create_grid_image(config):
                 img = img.convert("RGB")
             
             grid_img.paste(img, (int(x), int(y)))
+            
+            # Desenhar Borda Externa na Carta
+            if draw_border:
+                # O cálculo expande o retângulo para que o contorno fique ESTRITAMENTE do lado de fora da imagem
+                bx0 = x - effective_border
+                by0 = y - effective_border
+                bx1 = x + img_w + effective_border - 1
+                by1 = y + img_h + effective_border - 1
+                
+                draw.rectangle(
+                    [bx0, by0, bx1, by1],
+                    outline=card_border_rgb,
+                    width=border_thickness
+                )
 
     # ------------------------
-    # DESENHAR MARCAS (CORREÇÃO DE CENTRALIZAÇÃO)
+    # DESENHAR MARCAS DE CORTE
     # ------------------------
     if guide:
-        # Usamos um set para evitar desenhar a mesma cruz duas vezes 
-        # nos pontos de intersecção compartilhados
-        drawn_points = set()
+        # Definir limites absolutos da grade (para saber o que é "para fora")
+        x_min, x_max = margin, margin + cols * cell_w
+        y_min, y_max = margin, margin + used_rows * cell_h
 
-        for index in range(total_images):
-            row = index // cols
-            col = index % cols
+        # Iteramos por todas as linhas de grade (incluindo as extremidades)
+        for row in range(used_rows + 1):
+            for col in range(cols + 1):
+                cx = margin + (col * cell_w)
+                cy = margin + (row * cell_h)
+                
+                # Identifica se a intersecção está tocando os limites externos
+                is_top_bound = (cy == y_min)
+                is_bottom_bound = (cy == y_max)
+                is_left_bound = (cx == x_min)
+                is_right_bound = (cx == x_max)
 
-            # Coordenadas dos 4 cantos da CÉLULA (onde as linhas de corte devem se cruzar)
-            x0 = margin + (col * cell_w)
-            y0 = margin + (row * cell_h)
-            x1 = x0 + cell_w
-            y1 = y0 + cell_h
+                # Por padrão, as hastes da cruz têm o tamanho guide_size (internas)
+                up_len = guide_size
+                down_len = guide_size
+                left_len = guide_size
+                right_len = guide_size
 
-            # Cantos para verificar intersecção: Inferior Direito, Inferior Esquerdo e Superior Direito
-            # O Superior Esquerdo de uma imagem é o Inferior Direito de outra.
-            check_points = []
-            
-            # Se houver imagem à direita, marca o ponto vertical entre elas
-            if col < cols - 1 and (index + 1) < total_images:
-                check_points.append((x1, y0 + cell_h // 2)) # Marca lateral (opcional)
-            
-            # Se houver imagem abaixo, marca o ponto horizontal entre elas
-            if (index + cols) < total_images:
-                check_points.append((x0 + cell_w // 2, y1)) # Marca inferior (opcional)
+                # Se for borda, substituimos pelo valor externo (se ativado) ou 0
+                if is_top_bound:
+                    up_len = guide_outward_size if guide_extend else 0
+                if is_bottom_bound:
+                    down_len = guide_outward_size if guide_extend else 0
+                if is_left_bound:
+                    left_len = guide_outward_size if guide_extend else 0
+                if is_right_bound:
+                    right_len = guide_outward_size if guide_extend else 0
 
-            # Lógica de Intersecção de Quinas (A que você pediu: Cruz nos encontros)
-            # Verificamos os 4 cantos de cada célula
-            for cx, cy in [(x1, y1), (x1, y0), (x0, y1)]:
-                # Se o ponto estiver dentro dos limites internos da grade (não for borda externa)
-                if margin < cx < (grid_w - margin) or margin < cy < (grid_h - margin):
-                    if (cx, cy) not in drawn_points:
-                        
-                        # Desenha a Cruz (+)
-                        # Linha Vertical
-                        draw.line(
-                            [(cx, cy - guide_size), (cx, cy + guide_size)],
-                            fill=guide_rgb,
-                            width=guide_thickness
-                        )
-                        # Linha Horizontal
-                        draw.line(
-                            [(cx - guide_size, cy), (cx + guide_size, cy)],
-                            fill=guide_rgb,
-                            width=guide_thickness
-                        )
-                        drawn_points.add((cx, cy))
+                # Desenhar as 4 linhas a partir do centro (cx, cy)
+                if up_len > 0:
+                    draw.line([(cx, cy), (cx, cy - up_len)], fill=guide_rgb, width=guide_thickness)
+                if down_len > 0:
+                    draw.line([(cx, cy), (cx, cy + down_len)], fill=guide_rgb, width=guide_thickness)
+                if left_len > 0:
+                    draw.line([(cx, cy), (cx - left_len, cy)], fill=guide_rgb, width=guide_thickness)
+                if right_len > 0:
+                    draw.line([(cx, cy), (cx + right_len, cy)], fill=guide_rgb, width=guide_thickness)
 
     return grid_img
 
@@ -1102,11 +1125,18 @@ def images_to_grid(images_info, rows=3, cols=3,
                    guide_color='#000000',
                    guide_thickness=3,
                    guide_size=10,
+                   guide_extend=False,
+                   guide_outward_size=10,
+                   draw_border=False,
+                   border_color='#000000',
+                   border_thickness=1,
                    padding=0,
                    margin=0,
                    file_name="grid"):
 
     draw_guides = False if no_guides else True
+    if guide_extend and margin < guide_outward_size:
+        margin = guide_outward_size
 
     new_images_info = []
     old_images_info = []
@@ -1128,10 +1158,14 @@ def images_to_grid(images_info, rows=3, cols=3,
             'guide_color': guide_color,
             'guide_thickness': guide_thickness,
             'guide_size': guide_size,
+            'guide_extend': guide_extend,
+            'guide_outward_size': guide_outward_size,
+            'draw_border': draw_border,
+            'border_color': border_color,
+            'border_thickness': border_thickness,
             'padding': padding,
             'margin': margin
         }
-
 
         base_info = chunk[0].copy()
         

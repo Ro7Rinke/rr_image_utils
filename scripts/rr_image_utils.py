@@ -126,7 +126,12 @@ if __name__ == "__main__":
             'guide_size',
             'padding',
             'margin',
-            'file_name'
+            'file_name',
+            "guide_extend",
+            "guide_outward_size",
+            "draw_border",
+            "border_color",
+            "border_thickness"
         ]
 
         params = {key: input_dict[key] for key in params_filter if key in input_dict}
