@@ -1004,7 +1004,6 @@ def create_grid_image(config):
     margin = config.get('margin', 0)
     guide_size = config.get('guide_size', 10)
     
-    # --- NOVOS PARÂMETROS ---
     guide_extend = config.get('guide_extend', False)
     guide_outward_size = config.get('guide_outward_size', 10)
     
@@ -1015,121 +1014,90 @@ def create_grid_image(config):
     total_images = len(images)
     used_rows = math.ceil(total_images / cols)
 
-    # Pegamos o tamanho da primeira imagem para definir a grade
     with Image.open(images[0].get('path')) as sample:
         img_w, img_h = sample.size
 
     effective_border = border_thickness if draw_border else 0
-
-    # A célula agora considera o espaço extra da borda para que o centro das cruzes 
-    # fique exatamente no ponto médio entre as bordas de duas cartas vizinhas
+    
+    # Cálculo preciso da célula
     cell_w = img_w + (padding * 2) + (effective_border * 2)
     cell_h = img_h + (padding * 2) + (effective_border * 2)
 
-    grid_w = cols * cell_w + margin * 2
-    grid_h = used_rows * cell_h + margin * 2
+    grid_w = (cols * cell_w) + (margin * 2)
+    grid_h = (used_rows * cell_h) + (margin * 2)
 
-    grid_img = Image.new("RGB", (grid_w, grid_h), (255, 255, 255))
+    grid_img = Image.new("RGB", (int(grid_w), int(grid_h)), (255, 255, 255))
     draw = ImageDraw.Draw(grid_img)
     
-    guide_rgb = hex_to_rgb(guide_color)
-    if draw_border:
-        card_border_rgb = hex_to_rgb(border_color)
+    guide_rgb = hex_to_rgb(str(guide_color))
+    card_border_rgb = hex_to_rgb(str(border_color)) if draw_border else None
 
-    # ------------------------
-    # COLAR IMAGENS E BORDAS
-    # ------------------------
+    # 1. Colar imagens e bordas
     for index, image_info in enumerate(images):
         row = index // cols
         col = index % cols
 
-        # O X e Y agora consideram que a imagem começa depois da margem, 
-        # do padding e da própria borda que será desenhada
         x = margin + (col * cell_w) + padding + effective_border
         y = margin + (row * cell_h) + padding + effective_border
 
         with Image.open(image_info.get('path')) as img:
-            if img.mode in ("RGBA", "LA"):
-                bg = Image.new("RGB", img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[-1])
-                img = bg
-            else:
-                img = img.convert("RGB")
-            
+            img = img.convert("RGB")
             grid_img.paste(img, (int(x), int(y)))
             
-            # Desenhar Borda Externa na Carta
             if draw_border:
-                # O cálculo expande o retângulo para que o contorno fique ESTRITAMENTE do lado de fora da imagem
-                bx0 = x - effective_border
-                by0 = y - effective_border
-                bx1 = x + img_w + effective_border - 1
-                by1 = y + img_h + effective_border - 1
-                
-                draw.rectangle(
-                    [bx0, by0, bx1, by1],
-                    outline=card_border_rgb,
-                    width=border_thickness
-                )
+                # O segredo aqui: o retângulo da borda deve envolver a imagem exatamente
+                # bx1 e by1 precisam ser o canto exato onde a imagem termina
+                bx0 = int(x - effective_border)
+                by0 = int(y - effective_border)
+                bx1 = int(x + img_w + effective_border - 1)
+                by1 = int(y + img_h + effective_border - 1)
+                draw.rectangle([bx0, by0, bx1, by1], outline=card_border_rgb, width=border_thickness)
 
-    # ------------------------
-    # DESENHAR MARCAS DE CORTE
-    # ------------------------
+    # 2. Desenhar Marcas de Corte (Lógica de Linha Única para evitar o efeito "L")
     if guide:
-        # Definir limites absolutos da grade (para saber o que é "para fora")
-        x_min, x_max = margin, margin + cols * cell_w
-        y_min, y_max = margin, margin + used_rows * cell_h
+        x_max_grid = margin + (cols * cell_w)
+        y_max_grid = margin + (used_rows * cell_h)
 
-        # Iteramos por todas as linhas de grade (incluindo as extremidades)
-        for row in range(used_rows + 1):
-            for col in range(cols + 1):
-                cx = margin + (col * cell_w)
-                cy = margin + (row * cell_h)
+        for r in range(used_rows + 1):
+            for c in range(cols + 1):
+                cx = int(margin + (c * cell_w))
+                cy = int(margin + (r * cell_h))
                 
-                # Identifica se a intersecção está tocando os limites externos
-                is_top_bound = (cy == y_min)
-                is_bottom_bound = (cy == y_max)
-                is_left_bound = (cx == x_min)
-                is_right_bound = (cx == x_max)
+                # Evita desenhar guias em espaços vazios no final do grid
+                if r == used_rows and c > (total_images % cols) and (total_images % cols) != 0:
+                    continue
 
-                # Por padrão, as hastes da cruz têm o tamanho guide_size (internas)
-                up_len = guide_size
-                down_len = guide_size
-                left_len = guide_size
-                right_len = guide_size
+                is_top = (r == 0)
+                is_bottom = (r == used_rows)
+                is_left = (c == 0)
+                is_right = (c == cols)
 
-                # Se for borda, substituimos pelo valor externo (se ativado) ou 0
-                if is_top_bound:
-                    up_len = guide_outward_size if guide_extend else 0
-                if is_bottom_bound:
-                    down_len = guide_outward_size if guide_extend else 0
-                if is_left_bound:
-                    left_len = guide_outward_size if guide_extend else 0
-                if is_right_bound:
-                    right_len = guide_outward_size if guide_extend else 0
+                # --- EIXO VERTICAL ---
+                v_start = cy - (guide_outward_size if (is_top and guide_extend) else (0 if is_top else guide_size))
+                v_end = cy + (guide_outward_size if (is_bottom and guide_extend) else (0 if is_bottom else guide_size))
+                
+                if v_start != v_end:
+                    draw.line([(cx, v_start), (cx, v_end)], fill=guide_rgb, width=guide_thickness)
 
-                # Desenhar as 4 linhas a partir do centro (cx, cy)
-                if up_len > 0:
-                    draw.line([(cx, cy), (cx, cy - up_len)], fill=guide_rgb, width=guide_thickness)
-                if down_len > 0:
-                    draw.line([(cx, cy), (cx, cy + down_len)], fill=guide_rgb, width=guide_thickness)
-                if left_len > 0:
-                    draw.line([(cx, cy), (cx - left_len, cy)], fill=guide_rgb, width=guide_thickness)
-                if right_len > 0:
-                    draw.line([(cx, cy), (cx + right_len, cy)], fill=guide_rgb, width=guide_thickness)
+                # --- EIXO HORIZONTAL ---
+                h_start = cx - (guide_outward_size if (is_left and guide_extend) else (0 if is_left else guide_size))
+                h_end = cx + (guide_outward_size if (is_right and guide_extend) else (0 if is_right else guide_size))
+
+                if h_start != h_end:
+                    draw.line([(h_start, cy), (h_end, cy)], fill=guide_rgb, width=guide_thickness)
 
     return grid_img
 
 def images_to_grid(images_info, rows=3, cols=3,
                    no_guides=False,
-                   guide_color='#000000',
-                   guide_thickness=3,
+                   guide_color='#757575',
+                   guide_thickness=2,
                    guide_size=10,
                    guide_extend=False,
-                   guide_outward_size=10,
+                   guide_outward_size=30,
                    draw_border=False,
                    border_color='#000000',
-                   border_thickness=1,
+                   border_thickness=5,
                    padding=0,
                    margin=0,
                    file_name="grid"):
@@ -1195,7 +1163,7 @@ def images_to_grid(images_info, rows=3, cols=3,
 
 # --action to_pdf --file_name brass --output_directory_path "/Users/ro7rinke/Documents/rr_image_utils/data/temp"
     
-
+# --action to_grid --cols 3 --rows 3 --guide_extend --guide_thickness 2 --draw_border --border_color "777" --border_thickness 3
 
 
 
